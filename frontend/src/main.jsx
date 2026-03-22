@@ -577,36 +577,19 @@ function SurveyPage() {
               )}
 
               {currentPage === totalPages && (
-              <div>
-                <label className="block font-bold text-gray-800 text-lg mb-3 flex items-center gap-2">
-                  <MessageCircle className="w-5 h-5 text-gray-400" />
-                  Additional Comments
-                  <span className="text-sm font-normal text-gray-500">(Optional)</span>
-                </label>
-                <textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Share any additional feedback or suggestions to help us serve you better..."
-                  className="w-full p-5 border-2 border-gray-100 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 resize-none transition-all text-gray-700"
-                  rows={4}
-                />
-              </div>
-              )}
-
-              {currentPage === totalPages && (
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-5 px-8 rounded-2xl hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 shadow-2xl shadow-blue-200 hover:shadow-3xl hover:shadow-blue-300 text-lg"
+                className="mx-auto bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-3 px-10 rounded-xl hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-200 hover:shadow-xl hover:shadow-blue-300"
               >
                 {submitting ? (
                   <>
-                    <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
                     Submitting...
                   </>
                 ) : (
                   <>
-                    <Send className="w-6 h-6" />
+                    <Send className="w-5 h-5" />
                     Submit Feedback
                   </>
                 )}
