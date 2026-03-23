@@ -65,22 +65,51 @@ function SurveyPage() {
   const [finishReason, setFinishReason] = React.useState('');
   const [patientName, setPatientName] = React.useState('');
   const [doctors, setDoctors] = React.useState([]);
-  const [questions, setQuestions] = React.useState([]);
-  const [ratings, setRatings] = React.useState({});
+  const [doctorQuestions, setDoctorQuestions] = React.useState([]);
+  const [generalQuestions, setGeneralQuestions] = React.useState([]);
   const [questionAnswers, setQuestionAnswers] = React.useState({});
-  const [comment, setComment] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
-  const [currentPage, setCurrentPage] = React.useState(1);
+  const [currentPage, setCurrentPage] = React.useState(0);
 
-  const totalPages = React.useMemo(() => {
-    if (questions.length === 0) return 1;
-    const pages = questions.map(q => q.page_number || 1);
-    return Math.max(...pages);
-  }, [questions]);
+  const totalPages = doctors.length + (generalQuestions.length > 0 ? 1 : 0);
 
-  const questionsOnPage = React.useMemo(() => {
-    return questions.filter(q => (q.page_number || 1) === currentPage);
-  }, [questions, currentPage]);
+  function getQuestionLabelWithDoctorName(label, doctorName) {
+    return label.replace(/\{doctor_name\}/gi, doctorName);
+  }
+
+  function getDoctorQuestionKey(doctorId, questionId) {
+    return `doctor_${doctorId}_${questionId}`;
+  }
+
+  function getCurrentDoctor() {
+    if (currentPage < doctors.length) {
+      return doctors[currentPage];
+    }
+    return null;
+  }
+
+  function isOnGeneralPage() {
+    return currentPage >= doctors.length;
+  }
+
+  function goToNextPage() {
+    if (currentPage < totalPages - 1) {
+      setCurrentPage(currentPage + 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  function goToPrevPage() {
+    if (currentPage > 0) {
+      setCurrentPage(currentPage - 1);
+      setError('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  function validateCurrentPage() {
+    return '';
+  }
 
   React.useEffect(() => {
     async function loadSurvey() {
@@ -105,7 +134,8 @@ function SurveyPage() {
 
         setPatientName(data.patient_name || 'N/A');
         setDoctors(data.doctors || []);
-        setQuestions(data.questions || []);
+        setDoctorQuestions(data.doctor_questions || []);
+        setGeneralQuestions(data.general_questions || []);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -116,62 +146,74 @@ function SurveyPage() {
     loadSurvey();
   }, [token]);
 
-  function setQuestionValue(id, value) {
-    setQuestionAnswers((prev) => ({ ...prev, [id]: value }));
+  React.useEffect(() => {
+    setError('');
+  }, [currentPage]);
+
+  function setQuestionValue(key, value) {
+    setQuestionAnswers((prev) => ({ ...prev, [key]: value }));
   }
 
-  function toggleMultiChoice(id, option) {
+  function toggleMultiChoice(key, option) {
     setQuestionAnswers((prev) => {
-      const current = Array.isArray(prev[id]) ? prev[id] : [];
+      const current = Array.isArray(prev[key]) ? prev[key] : [];
       const exists = current.includes(option);
       const next = exists ? current.filter((x) => x !== option) : [...current, option];
-      return { ...prev, [id]: next };
+      return { ...prev, [key]: next };
     });
   }
 
-  function validateForm() {
-    if (currentPage === 1) {
-      for (const d of doctors) {
-        if (!Number.isInteger(ratings[d.id])) return 'Please rate every doctor.';
+  function validateAllQuestions() {
+    for (const d of doctors) {
+      for (const q of doctorQuestions) {
+        if (q.required) {
+          const key = getDoctorQuestionKey(d.id, q.id);
+          if (!(key in questionAnswers)) return 'Please answer all required doctor questions';
+        }
       }
     }
-
-    for (const q of questionsOnPage) {
-      if (q.required && !(q.id in questionAnswers)) return 'Please answer all required questions on this page.';
+    for (const q of generalQuestions) {
+      if (q.required) {
+        const answer = questionAnswers[q.id];
+        if (answer === undefined || answer === null || answer === '') {
+          return 'SUBMIT_VALIDATION: Please answer all required general questions';
+        }
+      }
     }
-
     return '';
-  }
-
-  function canGoNext() {
-    if (currentPage === 1) {
-      for (const d of doctors) {
-        if (!Number.isInteger(ratings[d.id])) return false;
-      }
-    }
-    for (const q of questionsOnPage) {
-      if (q.required && !(q.id in questionAnswers)) return false;
-    }
-    return true;
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
 
-    const validationError = validateForm();
-    if (validationError) {
-      setError(validationError);
-      return;
+    for (const d of doctors) {
+      for (const q of doctorQuestions) {
+        if (q.required) {
+          const key = getDoctorQuestionKey(d.id, q.id);
+          if (!(key in questionAnswers) || questionAnswers[key] === '' || questionAnswers[key] === null || questionAnswers[key] === undefined) {
+            setError('Please answer all required questions for ' + d.doctor_name);
+            return;
+          }
+        }
+      }
+    }
+    
+    for (const q of generalQuestions) {
+      if (q.required) {
+        const answer = questionAnswers[q.id];
+        if (answer === undefined || answer === null || answer === '') {
+          setError('Please answer all required general questions');
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
     try {
       const payload = {
         token,
-        ratings: Object.keys(ratings).map((doctorId) => ({ doctor_id: doctorId, rating: ratings[doctorId] })),
-        question_answers: questionAnswers,
-        comment: comment || null
+        question_answers: questionAnswers
       };
 
       const res = await fetch('/api/feedback', {
@@ -202,14 +244,14 @@ function SurveyPage() {
     }
   }
 
-  function renderQuestionInput(q) {
-    const value = questionAnswers[q.id];
+  function renderQuestionInput(q, answerKey) {
+    const value = questionAnswers[answerKey];
 
     if (q.type === 'text') {
       return (
         <textarea
           value={typeof value === 'string' ? value : ''}
-          onChange={(e) => setQuestionValue(q.id, e.target.value)}
+          onChange={(e) => setQuestionValue(answerKey, e.target.value)}
           placeholder="Share your thoughts with us..."
           className="w-full p-5 border-2 border-gray-100 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 resize-none transition-all text-gray-700"
           rows={4}
@@ -224,7 +266,7 @@ function SurveyPage() {
           value={value ?? ''}
           min={q.min ?? undefined}
           max={q.max ?? undefined}
-          onChange={(e) => setQuestionValue(q.id, e.target.value === '' ? '' : Number(e.target.value))}
+          onChange={(e) => setQuestionValue(answerKey, e.target.value === '' ? '' : Number(e.target.value))}
           placeholder="Enter a number"
           className="w-full p-5 border-2 border-gray-100 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 transition-all text-gray-700"
         />
@@ -237,7 +279,7 @@ function SurveyPage() {
           <button
             key="yes"
             type="button"
-            onClick={() => setQuestionValue(q.id, 'yes')}
+            onClick={() => setQuestionValue(answerKey, 'yes')}
             className={`flex-1 max-w-[180px] py-6 rounded-2xl font-bold transition-all flex flex-col items-center gap-2 ${
               value === 'yes'
                 ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-xl shadow-emerald-200 scale-105'
@@ -250,7 +292,7 @@ function SurveyPage() {
           <button
             key="no"
             type="button"
-            onClick={() => setQuestionValue(q.id, 'no')}
+            onClick={() => setQuestionValue(answerKey, 'no')}
             className={`flex-1 max-w-[180px] py-6 rounded-2xl font-bold transition-all flex flex-col items-center gap-2 ${
               value === 'no'
                 ? 'bg-gradient-to-br from-red-400 to-red-600 text-white shadow-xl shadow-red-200 scale-105'
@@ -271,7 +313,7 @@ function SurveyPage() {
             <button
               key={opt}
               type="button"
-              onClick={() => setQuestionValue(q.id, opt)}
+              onClick={() => setQuestionValue(answerKey, opt)}
               className={`py-4 px-4 rounded-2xl font-semibold transition-all flex items-center justify-center gap-3 ${
                 value === opt
                   ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200'
@@ -298,7 +340,7 @@ function SurveyPage() {
             <button
               key={opt}
               type="button"
-              onClick={() => toggleMultiChoice(q.id, opt)}
+              onClick={() => toggleMultiChoice(answerKey, opt)}
               className={`py-4 px-4 rounded-2xl font-semibold transition-all flex items-center justify-center gap-2 ${
                 selected.includes(opt)
                   ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-200'
@@ -317,7 +359,7 @@ function SurveyPage() {
     const max = Number.isFinite(q.max) ? q.max : 5;
     return (
       <div className="flex flex-col items-center gap-4">
-        <StarRating value={value} min={min} max={max} onChange={(next) => setQuestionValue(q.id, next)} size="xl" />
+        <StarRating value={value} min={min} max={max} onChange={(next) => setQuestionValue(answerKey, next)} size="xl" />
         <span className="text-base text-gray-500 font-medium">
           {value ? `${value} out of ${max}` : `Tap to rate (${min}-${max})`}
         </span>
@@ -461,147 +503,216 @@ function SurveyPage() {
               </div>
             )}
 
-<form onSubmit={handleSubmit} className="space-y-8">
-              {currentPage === 1 && (
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6 flex items-center gap-5 border border-blue-100">
-                <div className="w-14 h-14 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
-                  {patientName.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">Hello, welcome</p>
-                  <p className="text-xl font-bold text-gray-800">{patientName}</p>
-                </div>
-              </div>
-              )}
-
-              {currentPage === 1 && (
-              <div className="space-y-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-200">
-                    <Star className="w-6 h-6 text-white" />
+<form onSubmit={handleSubmit} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }} className="space-y-6">
+              {currentPage === 0 && (
+                <div className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-5 flex items-center gap-4 border-2 border-gray-100">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow">
+                    {patientName.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-800 text-xl">Rate Your Doctors</h3>
-                    <p className="text-sm text-gray-500">Your ratings help us recognize excellence</p>
+                    <p className="text-sm text-gray-500 font-medium">Hello, welcome</p>
+                    <p className="text-lg font-bold text-gray-800">{patientName}</p>
                   </div>
                 </div>
+              )}
+
+              <div className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-4 border-2 border-gray-100">
+                <div className="flex items-center justify-between gap-2">
+                  {doctors.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
+                          currentPage < doctors.length
+                            ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg'
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
+                        {currentPage >= doctors.length ? (
+                          <Check className="w-4 h-4" />
+                        ) : (
+                          <Users className="w-4 h-4" />
+                        )}
+                        <span className="text-sm font-medium whitespace-nowrap">Doctors ({doctors.length})</span>
+                      </div>
+                      {generalQuestions.length > 0 && (
+                        <div className={`w-6 h-0.5 ${currentPage >= doctors.length ? 'bg-emerald-400' : 'bg-gray-300'}`} />
+                      )}
+                    </div>
+                  )}
+                  {generalQuestions.length > 0 && (
+                    <div
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
+                        currentPage >= doctors.length
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      <span className="text-sm font-medium">General</span>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center gap-3">
+                  <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300"
+                      style={{ width: `${((currentPage + 1) / totalPages) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
+                    {currentPage + 1} / {totalPages}
+                  </span>
+                </div>
+              </div>
+
+              {(() => {
+                const currentDoctor = getCurrentDoctor();
                 
-                {doctors.map((d, idx) => (
-                  <div key={d.id} className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-6 border-2 border-gray-100 hover:border-blue-200 transition-all">
-                    <div className="flex items-center justify-between mb-5">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
-                          {d.doctor_name.charAt(0).toUpperCase()}
+                if (currentDoctor) {
+                  return (
+                    <div className="space-y-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
+                          <Users className="w-6 h-6 text-white" />
                         </div>
                         <div>
-                          <p className="font-bold text-gray-800 text-lg">{d.doctor_name}</p>
-                          <p className="text-sm text-gray-500">Doctor #{idx + 1}</p>
+                          <h3 className="font-bold text-gray-800 text-xl">Doctor Survey</h3>
+                          <p className="text-sm text-gray-500">Page {currentPage + 1} of {totalPages}</p>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex justify-center">
-                      <StarRating
-                        value={ratings[d.id]}
-                        onChange={(next) => setRatings((prev) => ({ ...prev, [d.id]: next }))}
-                        size="xl"
-                      />
-                    </div>
-                    {ratings[d.id] && (
-                      <p className="text-center text-base text-gray-500 mt-3 font-medium">
-                        {ratings[d.id] === 5 && "🌟 Excellent! We're thrilled to hear this!"}
-                        {ratings[d.id] === 4 && "👍 Very Good! Thank you for your positive feedback!"}
-                        {ratings[d.id] === 3 && "📊 Good. We'll continue to improve."}
-                        {ratings[d.id] === 2 && "📝 Fair. We value your honest input."}
-                        {ratings[d.id] === 1 && "💡 We appreciate your feedback and will improve."}
-                      </p>
-)}
-                  </div>
-                ))}
-              </div>
-              )}
 
-              {questions.length > 0 && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-12 h-12 bg-gradient-to-br from-violet-400 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-200">
-                      <ClipboardList className="w-6 h-6 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-gray-800 text-xl">Survey Questions {totalPages > 1 ? `(Page ${currentPage} of ${totalPages})` : ''}</h3>
-                      <p className="text-sm text-gray-500">Please answer the following</p>
-                    </div>
-                  </div>
-                  
-                  {questionsOnPage.map((q) => (
-                    <div key={q.id} className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-6 border-2 border-gray-100">
-                      <label className="block font-bold text-gray-800 text-lg mb-4 flex items-start gap-2">
-                        <span className="text-blue-500 mt-1">Q.</span>
-                        {q.label}
-                        {q.required && <span className="text-red-400 mt-1">*</span>}
-                      </label>
-                      {renderQuestionInput(q)}
-                    </div>
-                  ))}
+                      <div className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-6 border-2 border-gray-100">
+                        <div className="flex items-center gap-4 mb-6">
+                          <div className="w-14 h-14 bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                            {currentDoctor.doctor_name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-gray-800 text-lg">{currentDoctor.doctor_name}</p>
+                          </div>
+                        </div>
 
-                  {totalPages > 1 && (
-                    <div className="flex justify-center gap-4 mt-6">
-                      {currentPage > 1 && (
+                        <div className="space-y-6">
+                          {doctorQuestions.map((q) => {
+                            const answerKey = getDoctorQuestionKey(currentDoctor.id, q.id);
+                            return (
+                              <div key={`${currentDoctor.id}_${q.id}`} className="bg-white rounded-xl p-5 border border-gray-100">
+                                <label className="block font-semibold text-gray-800 text-base mb-4 flex items-start gap-2">
+                                  <span className="text-blue-500 mt-0.5">Q.</span>
+                                  {getQuestionLabelWithDoctorName(q.label, currentDoctor.doctor_name)}
+                                  {q.required && <span className="text-red-400">*</span>}
+                                </label>
+                                {renderQuestionInput(q, answerKey)}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between">
+                        {currentPage > 0 ? (
+                          <button
+                            type="button"
+                            onClick={goToPrevPage}
+                            className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2"
+                          >
+                            <ChevronLeft className="w-5 h-5" />
+                            Previous
+                          </button>
+                        ) : (
+                          <div />
+                        )}
                         <button
                           type="button"
-                          onClick={() => setCurrentPage(currentPage - 1)}
-                          className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center gap-2 transition-colors"
-                        >
-                          <ChevronLeft className="w-5 h-5" /> Previous
-                        </button>
-                      )}
-                      {currentPage < totalPages && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!canGoNext()) {
-                              setError('Please complete all required fields before moving to the next page.');
-                              return;
+                          onClick={(e) => {
+                            e.preventDefault();
+                            
+                            if (currentPage < doctors.length) {
+                              const currentDoctor = doctors[currentPage];
+                              for (const q of doctorQuestions) {
+                                if (q.required) {
+                                  const key = getDoctorQuestionKey(currentDoctor.id, q.id);
+                                  const answer = questionAnswers[key];
+                                  if (answer === undefined || answer === null || answer === '') {
+                                    setError('Please answer all required questions for ' + currentDoctor.doctor_name);
+                                    return;
+                                  }
+                                }
+                              }
                             }
+                            
                             setError('');
-                            setCurrentPage(currentPage + 1);
+                            goToNextPage();
                           }}
-                          disabled={!canGoNext()}
-                          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 font-medium flex items-center gap-2 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-200"
                         >
-                          Next <ChevronRight className="w-5 h-5" />
+                          {currentPage === doctors.length - 1 && generalQuestions.length > 0 ? 'Next: General' : 'Next'}
+                          <ArrowRight className="w-5 h-5" />
                         </button>
-                      )}
+                      </div>
                     </div>
-)}
-              </div>
-              )}
+                  );
+                }
 
-              {currentPage === totalPages && (
-              <button
-                type="submit"
-                disabled={submitting}
-                className="mx-auto bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-3 px-10 rounded-xl hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-200 hover:shadow-xl hover:shadow-blue-300"
-              >
-                {submitting ? (
-                  <>
-                    <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-5 h-5" />
-                    Submit Feedback
-                  </>
-                )}
-              </button>
-              )}
+                return (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg">
+                        <ClipboardList className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-gray-800 text-xl">General Survey</h3>
+                        <p className="text-sm text-gray-500">Hospital and service feedback</p>
+                      </div>
+                    </div>
 
-              {currentPage === totalPages && (
-              <div className="flex items-center justify-center gap-3 text-sm text-gray-400">
-                <Shield className="w-4 h-4" />
-                <span>Your response is confidential and secure</span>
-              </div>
-              )}
+                    <div className="space-y-6">
+                      {generalQuestions.map((q) => (
+                        <div key={q.id} className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-6 border-2 border-gray-100">
+                          <label className="block font-bold text-gray-800 text-lg mb-4 flex items-start gap-2">
+                            <span className="text-emerald-500 mt-1">Q.</span>
+                            {q.label}
+                            {q.required && <span className="text-red-400 mt-1">*</span>}
+                          </label>
+                          {renderQuestionInput(q, q.id)}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-between">
+                      <button
+                        type="button"
+                        onClick={goToPrevPage}
+                        className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2"
+                      >
+                        <ChevronLeft className="w-5 h-5" />
+                        Previous
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold py-3 px-8 rounded-xl hover:from-emerald-600 hover:to-teal-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
+                      >
+                        {submitting ? (
+                          <>
+                            <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Submitting...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-5 h-5" />
+                            Submit Feedback
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-3 text-sm text-gray-400 mt-4">
+                      <Shield className="w-4 h-4" />
+                      <span>Your response is confidential and secure</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </form>
           </div>
         </div>
@@ -632,8 +743,10 @@ function AdminDashboard() {
     options: [],
     min: 1,
     max: 5,
-    page_number: 1
+    page_number: 1,
+    category: 'general'
   });
+  const [questionFilter, setQuestionFilter] = React.useState('all');
   const [editingQuestion, setEditingQuestion] = React.useState(null);
   const [optionInput, setOptionInput] = React.useState('');
   const [deleteModal, setDeleteModal] = React.useState({ isOpen: false, question: null });
@@ -657,10 +770,18 @@ function AdminDashboard() {
     return String(value);
   }
 
-  function formatDoctorNames(ratings) {
-    const items = Array.isArray(ratings) ? ratings : [];
-    if (!items.length) return '-';
-    return items.map((x) => x.doctor_name).join(', ');
+  function formatDoctorNames(questionAnswers, doctorNames) {
+    if (doctorNames) return doctorNames;
+    if (!questionAnswers || typeof questionAnswers !== 'object') return '-';
+    const doctorIds = new Set();
+    for (const key of Object.keys(questionAnswers)) {
+      const match = key.match(/^doctor_([^_]+)_/);
+      if (match) {
+        doctorIds.add(match[1]);
+      }
+    }
+    if (doctorIds.size === 0) return '-';
+    return 'Doctors (' + doctorIds.size + ')';
   }
 
   function formatDoctorRatings(ratings) {
@@ -814,7 +935,8 @@ function AdminDashboard() {
         options: newQuestion.options,
         min: newQuestion.min,
         max: newQuestion.max,
-        page_number: newQuestion.page_number || 1
+        page_number: newQuestion.page_number || 1,
+        category: newQuestion.category
       };
 
       let res, data;
@@ -839,7 +961,7 @@ function AdminDashboard() {
         showMessage('Question created successfully', 'success');
       }
 
-      setNewQuestion({ key: '', label: '', type: 'stars', required: true, options: [], min: 1, max: 5, page_number: 1 });
+      setNewQuestion({ key: '', label: '', type: 'stars', required: true, options: [], min: 1, max: 5, page_number: 1, category: 'general' });
       setOptionInput('');
       await loadAll(false);
     } catch (err) {
@@ -857,7 +979,8 @@ function AdminDashboard() {
       options: q.options || [],
       min: q.min_value || 1,
       max: q.max_value || 5,
-      page_number: q.page_number || 1
+      page_number: q.page_number || 1,
+      category: q.category || 'general'
     });
     setOptionInput('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -865,7 +988,7 @@ function AdminDashboard() {
 
   function cancelEdit() {
     setEditingQuestion(null);
-    setNewQuestion({ key: '', label: '', type: 'stars', required: true, options: [], min: 1, max: 5, page_number: 1 });
+    setNewQuestion({ key: '', label: '', type: 'stars', required: true, options: [], min: 1, max: 5, page_number: 1, category: 'general' });
     setOptionInput('');
   }
 
@@ -937,17 +1060,27 @@ function AdminDashboard() {
 
   function getExportData(data) {
     return data.map((r) => {
+      const qa = r.question_answers || {};
       const row = {
         'Submission ID': r.submission_id,
         'Submitted At': r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '',
         'Visit ID': r.visit_id,
         'Patient Name': r.patient_name,
-        'Doctor Names': formatDoctorNames(r.ratings),
-        'Doctor Ratings': formatDoctorRatings(r.ratings),
-        'Comment': r.comment || ''
+        'Doctors': r.doctor_names || '-'
       };
-      questions.forEach((q) => {
-        row[q.label] = formatAnswerValue((r.question_answers || {})[q.key]);
+      
+      questions.filter(q => q.category === 'doctor').forEach((q) => {
+        const answers = [];
+        for (const key of Object.keys(qa)) {
+          if (key.endsWith('_' + q.key)) {
+            answers.push(qa[key]);
+          }
+        }
+        row[q.key + ' (dr)'] = formatAnswerValue(answers.length > 0 ? answers.join(', ') : '-');
+      });
+      
+      questions.filter(q => q.category === 'general').forEach((q) => {
+        row[q.key + ' (general)'] = formatAnswerValue(qa[q.key]);
       });
       return row;
     });
@@ -1196,7 +1329,7 @@ function AdminDashboard() {
                   <span className="text-xs px-2.5 py-1 bg-emerald-100 text-emerald-600 rounded-full font-medium">Questions</span>
                 </div>
                 <p className="text-gray-500 text-sm font-medium">Survey Questions</p>
-                <p className="text-4xl font-bold text-gray-800 mt-1">{questions.length + 1}</p>
+                <p className="text-4xl font-bold text-gray-800 mt-1">{questions.length}</p>
               </div>
 
               <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-lg transition-shadow">
@@ -1216,7 +1349,7 @@ function AdminDashboard() {
             </div>
 
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                   <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
                     <BarChart3 className="w-4 h-4 text-blue-600" />
@@ -1226,46 +1359,61 @@ function AdminDashboard() {
               </div>
 
               {analytics?.doctor_averages?.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {analytics.doctor_averages.map((doctor) => {
                     const rating = Number(doctor.avg_rating || 0);
                     const percentage = (rating / 5) * 100;
+                    const questionRatings = doctor.question_ratings || {};
+                    const questionKeys = Object.keys(questionRatings);
+                    
                     return (
-                      <div key={doctor.doctor_id} className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-5 border border-gray-100">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl flex items-center justify-center text-white font-bold text-lg">
+                      <div key={doctor.doctor_id} className="bg-gradient-to-br from-gray-50 to-white rounded-xl p-4 border border-gray-100">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
                               {doctor.doctor_name.charAt(0)}
                             </div>
                             <div>
-                              <p className="font-semibold text-gray-800">{doctor.doctor_name}</p>
-                              <p className="text-sm text-gray-500">{doctor.rating_count} ratings</p>
+                              <p className="font-semibold text-gray-800 text-sm">{doctor.doctor_name}</p>
+                              <p className="text-xs text-gray-500">{doctor.rating_count} ratings</p>
                             </div>
                           </div>
-                          <div className={`px-4 py-2 rounded-xl text-sm font-bold border ${getRatingBg(rating)}`}>
-                            {rating.toFixed(1)} / 5
+                          <div className={`px-2 py-1 rounded-lg text-xs font-bold ${getRatingBg(rating)}`}>
+                            {rating.toFixed(1)}
                           </div>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 mb-3">
                           <div
-                            className={`h-2.5 rounded-full transition-all duration-500 ${
-                              rating >= 4.5 ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' :
-                              rating >= 3.5 ? 'bg-gradient-to-r from-blue-400 to-indigo-500' :
-                              rating >= 2.5 ? 'bg-gradient-to-r from-amber-400 to-amber-500' : 'bg-gradient-to-r from-red-400 to-red-500'
+                            className={`h-1.5 rounded-full ${
+                              rating >= 4.5 ? 'bg-emerald-500' :
+                              rating >= 3.5 ? 'bg-blue-500' :
+                              rating >= 2.5 ? 'bg-amber-500' : 'bg-red-500'
                             }`}
                             style={{ width: `${percentage}%` }}
                           />
                         </div>
-                        <div className="flex mt-3">
-                          <StarRating value={rating} size="sm" />
-                        </div>
+                        
+                        {questionKeys.length > 0 && (
+                          <div className="space-y-1 pt-2 border-t border-gray-100">
+                            {questionKeys.map((qKey) => (
+                              <div key={qKey} className="flex items-center justify-between py-0.5">
+                                <span className="text-xs text-gray-600 truncate flex-1">{qKey}</span>
+                                <div className="flex items-center gap-1 ml-2">
+                                  <StarRating value={questionRatings[qKey]} size="xs" />
+                                  <span className="text-xs font-medium text-gray-600">{questionRatings[qKey].toFixed(1)}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <div className="text-center py-16 bg-gradient-to-br from-gray-50 to-white rounded-2xl border-2 border-dashed border-gray-200">
-                  <BarChart3 className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                <div className="text-center py-12 bg-gradient-to-br from-gray-50 to-white rounded-xl border-2 border-dashed border-gray-200">
+                  <BarChart3 className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                   <p className="text-gray-500 font-medium">No ratings yet</p>
                   <p className="text-sm text-gray-400">Complete surveys to see analytics</p>
                 </div>
@@ -1297,7 +1445,7 @@ function AdminDashboard() {
                       type="text"
                       value={newQuestion.label}
                       onChange={(e) => setNewQuestion((p) => ({ ...p, label: e.target.value }))}
-                      placeholder="e.g., How was your experience?"
+                      placeholder={newQuestion.category === 'doctor' ? "e.g., How would you rate {doctor_name}'s professionalism?" : "e.g., How was your experience?"}
                       className="w-full p-3 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 transition-all"
                     />
                   </div>
@@ -1311,6 +1459,39 @@ function AdminDashboard() {
                       placeholder="e.g., experience_rating"
                       className="w-full p-3 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 transition-all"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Question Category</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setNewQuestion((p) => ({ ...p, category: 'general' }))}
+                        className={`p-3 rounded-xl font-medium transition-all flex flex-col items-center gap-1 ${
+                          newQuestion.category === 'general'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-200'
+                            : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-2 border-gray-100'
+                        }`}
+                      >
+                        <span className="text-lg">🏥</span>
+                        <span className="text-xs">General</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewQuestion((p) => ({ ...p, category: 'doctor' }))}
+                        className={`p-3 rounded-xl font-medium transition-all flex flex-col items-center gap-1 ${
+                          newQuestion.category === 'doctor'
+                            ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200'
+                            : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-2 border-gray-100'
+                        }`}
+                      >
+                        <span className="text-lg">👨‍⚕️</span>
+                        <span className="text-xs">Doctor</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      {newQuestion.category === 'doctor' && 'Use {doctor_name} in label to inject the doctor\'s name dynamically'}
+                    </p>
                   </div>
 
                   <div>
@@ -1412,38 +1593,73 @@ function AdminDashboard() {
               </div>
 
               <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
-                    <FileText className="w-4 h-4 text-blue-600" />
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
+                      <FileText className="w-4 h-4 text-blue-600" />
+                    </div>
+                    Survey Questions ({questions.length})
+                  </h3>
+                  
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setQuestionFilter('all')}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                        questionFilter === 'all'
+                          ? 'bg-gradient-to-r from-gray-600 to-gray-700 text-white shadow'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      All ({questions.length})
+                    </button>
+                    <button
+                      onClick={() => setQuestionFilter('doctor')}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                        questionFilter === 'doctor'
+                          ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Doctor ({questions.filter(q => q.category === 'doctor').length})
+                    </button>
+                    <button
+                      onClick={() => setQuestionFilter('general')}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                        questionFilter === 'general'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      General ({questions.filter(q => q.category === 'general').length})
+                    </button>
                   </div>
-                  Survey Questions ({questions.length + 1})
-                </h3>
+                </div>
 
                 <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-4">
-                    <span className="inline-block px-2.5 py-1 bg-blue-500 text-white rounded-lg text-xs font-bold mb-2">FIXED</span>
-                    <p className="font-semibold text-gray-800">How do you rate the doctor who treats you?</p>
-                    <div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
-                      <span className="px-2 py-0.5 bg-blue-100 rounded font-medium">★ Stars</span>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded font-medium">Required</span>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded font-medium">Active</span>
-                    </div>
-                  </div>
-
-                  {questions.map((q, idx) => (
+                  {questions
+                    .filter(q => questionFilter === 'all' || q.category === questionFilter)
+                    .sort((a, b) => (a.category === 'doctor' ? 0 : 1) - (b.category === 'doctor' ? 0 : 1))
+                    .map((q, idx) => (
                     <div key={q.id} className={`rounded-2xl p-4 border-2 transition-all ${q.is_active ? 'bg-gray-50 border-gray-200 hover:border-blue-200' : 'bg-gray-100 border-gray-300 opacity-70'}`}>
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
-                            <span className="font-bold text-gray-500">#{idx + 2}</span>
+                            <span className="font-bold text-gray-500">#{idx + 1}</span>
                             <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${q.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                               {q.is_active ? 'Active' : 'Inactive'}
                             </span>
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium">{q.type}</span>
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-medium">{q.type}</span>
                             {q.required && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-medium">Required</span>}
                           </div>
                           <p className="font-semibold text-gray-800">{q.label}</p>
                           <p className="text-sm text-gray-500 mt-1">Key: {q.key}</p>
+                          <span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-bold mt-2 ${
+                            q.category === 'doctor' 
+                              ? 'bg-blue-100 text-blue-700' 
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {q.category === 'doctor' ? '👨‍⚕️ Doctor' : '🏥 General'}
+                          </span>
                           {q.options?.length > 0 && (
                             <div className="flex flex-wrap gap-1.5 mt-2">
                               {q.options.map((opt) => (<span key={opt} className="px-2.5 py-1 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium">{opt}</span>))}
@@ -1461,6 +1677,12 @@ function AdminDashboard() {
                       </div>
                     </div>
                   ))}
+                  {questions.filter(q => questionFilter === 'all' || q.category === questionFilter).length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <FileText className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                      <p>No {questionFilter === 'all' ? '' : questionFilter} questions found</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1556,16 +1778,19 @@ function AdminDashboard() {
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Visit</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Patient</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Doctors</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Rating</th>
-                      {questions.map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.label}</th>))}
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[200px]">Comment</th>
+                      {questions
+                        .filter(q => q.category === 'doctor')
+                        .map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.key} (dr)</th>))}
+                      {questions
+                        .filter(q => q.category === 'general')
+                        .map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.key} (general)</th>))}
                     </tr>
                   </thead>
                   <tbody>
                     {loadingResponses ? (
-                      <tr><td colSpan={8 + questions.length} className="px-4 py-16 text-center"><div className="flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-100 border-t-blue-500 rounded-full animate-spin"></div></div></td></tr>
+                      <tr><td colSpan={5 + questions.length} className="px-4 py-16 text-center"><div className="flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-100 border-t-blue-500 rounded-full animate-spin"></div></div></td></tr>
                     ) : responses.length === 0 ? (
-                      <tr><td colSpan={8 + questions.length} className="px-4 py-12 text-center text-gray-500">No responses found</td></tr>
+                      <tr><td colSpan={5 + questions.length} className="px-4 py-12 text-center text-gray-500">No responses found</td></tr>
                     ) : (
                       responses.map((r) => (
                         <tr key={r.submission_id} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${selectedIds.has(r.submission_id) ? 'bg-blue-50' : ''}`}>
@@ -1573,19 +1798,26 @@ function AdminDashboard() {
                           <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '-'}</td>
                           <td className="px-4 py-3 text-sm text-gray-600 font-mono whitespace-nowrap">{r.visit_id}</td>
                           <td className="px-4 py-3 text-sm font-semibold text-gray-800 whitespace-nowrap">{r.patient_name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDoctorNames(r.ratings)}</td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <div className="flex flex-col gap-1">
-                              {(r.ratings || []).map((rating) => (
-                                <div key={rating.doctor_id} className="flex items-center gap-2">
-                                  <span className="text-xs text-gray-500 max-w-[100px] truncate">{rating.doctor_name}</span>
-                                  <StarRating value={rating.rating} size="sm" />
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                          {questions.map((q) => (<td key={q.id} className="px-4 py-3 text-sm text-gray-700 whitespace-normal max-w-[200px]"><span className="line-clamp-2">{formatAnswerValue((r.question_answers || {})[q.key])}</span></td>))}
-                          <td className="px-4 py-3 text-sm text-gray-700 max-w-[250px]"><span className="line-clamp-2">{r.comment || '-'}</span></td>
+                          <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatDoctorNames(r.question_answers, r.doctor_names)}</td>
+                          {questions
+                            .filter(q => q.category === 'doctor')
+                            .map((q) => {
+                              const answers = [];
+                              const qa = r.question_answers || {};
+                              for (const key of Object.keys(qa)) {
+                                if (key.endsWith('_' + q.key)) {
+                                  answers.push(qa[key]);
+                                }
+                              }
+                              return (
+                                <td key={q.id} className="px-4 py-3 text-sm text-gray-700 whitespace-normal max-w-[200px]">
+                                  <span className="line-clamp-2">{formatAnswerValue(answers.length > 0 ? answers.join(', ') : '-')}</span>
+                                </td>
+                              );
+                            })}
+                          {questions
+                            .filter(q => q.category === 'general')
+                            .map((q) => (<td key={q.id} className="px-4 py-3 text-sm text-gray-700 whitespace-normal max-w-[200px]"><span className="line-clamp-2">{formatAnswerValue((r.question_answers || {})[q.key])}</span></td>))}
                         </tr>
                       ))
                     )}

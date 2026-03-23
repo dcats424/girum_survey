@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS feedback_submissions (
   id BIGSERIAL PRIMARY KEY,
   token TEXT NOT NULL REFERENCES survey_tokens(token),
   visit_id TEXT NOT NULL REFERENCES visits(id),
-  patient_id TEXT NOT NULL REFERENCES patients(id),
+  patient_id TEXT REFERENCES patients(id),
+  patient_name TEXT,
+  doctor_names TEXT,
   comment TEXT,
   question_answers JSONB NOT NULL DEFAULT '{}'::jsonb,
   submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

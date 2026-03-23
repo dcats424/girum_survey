@@ -112,6 +112,7 @@ function normalizeQuestionInput(body) {
     : typeof body.options_csv === 'string'
       ? body.options_csv.split(',').map(textOrEmpty).filter(Boolean)
       : [];
+  const category = body.category === 'doctor' ? 'doctor' : 'general';
 
   if (!label) return { error: 'question_label_required' };
   if (!QUESTION_TYPES.has(type)) return { error: 'invalid_question_type' };
@@ -130,20 +131,39 @@ function normalizeQuestionInput(body) {
       options,
       min_value: min,
       max_value: max,
-      is_active: body.is_active === undefined ? true : Boolean(body.is_active)
+      is_active: body.is_active === undefined ? true : Boolean(body.is_active),
+      category
     }
   };
 }
 
-function validateQuestionAnswers(questionAnswers, questions) {
+function validateQuestionAnswers(questionAnswers, questions, doctors) {
   if (!questionAnswers || typeof questionAnswers !== 'object' || Array.isArray(questionAnswers)) {
     return { ok: false, error: 'invalid_question_answers' };
   }
 
+  const doctorQuestionKeys = new Set(questions.filter(q => q.category === 'doctor').map(q => q.key));
+  const generalQuestionKeys = new Set(questions.filter(q => q.category === 'general').map(q => q.key));
+
   for (const q of questions) {
     const qType = normalizeQuestionType(q.type);
-    const hasAnswer = Object.prototype.hasOwnProperty.call(questionAnswers, q.key);
-    const value = questionAnswers[q.key];
+    
+    let hasAnswer = false;
+    let value = null;
+    
+    if (q.category === 'doctor' && doctors && doctors.length > 0) {
+      for (const d of doctors) {
+        const prefixedKey = 'doctor_' + d.id + '_' + q.key;
+        if (Object.prototype.hasOwnProperty.call(questionAnswers, prefixedKey)) {
+          hasAnswer = true;
+          value = questionAnswers[prefixedKey];
+          break;
+        }
+      }
+    } else {
+      hasAnswer = Object.prototype.hasOwnProperty.call(questionAnswers, q.key);
+      value = questionAnswers[q.key];
+    }
 
     if (q.required && !hasAnswer) return { ok: false, error: 'missing_answer_' + q.key };
     if (!hasAnswer) continue;
@@ -213,18 +233,34 @@ async function ensureQuestionsTableAndDefaults() {
       order_no INT NOT NULL DEFAULT 0,
       is_active BOOLEAN NOT NULL DEFAULT TRUE,
       is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      category TEXT NOT NULL DEFAULT 'general',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  
+  await db.query(`
+    ALTER TABLE survey_questions 
+    ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'general'
   `);
 }
 
 async function fetchQuestions(args) {
   const includeInactive = args && args.includeInactive;
+  const categoryFilter = args && args.category;
+  
+  let whereClause = 'is_deleted = FALSE';
+  if (!includeInactive) {
+    whereClause += ' AND is_active = TRUE';
+  }
+  if (categoryFilter) {
+    whereClause += ` AND category = '${categoryFilter}'`;
+  }
+  
   const rows = await db.query(
-    `SELECT id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number
+    `SELECT id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category
      FROM survey_questions
-     WHERE is_deleted = FALSE ${includeInactive ? '' : 'AND is_active = TRUE'}
+     WHERE ${whereClause}
      ORDER BY page_number ASC, order_no ASC, id ASC`
   );
 
@@ -239,7 +275,8 @@ async function fetchQuestions(args) {
     max_value: r.max_value === null ? null : Number(r.max_value),
     order_no: Number(r.order_no),
     is_active: Boolean(r.is_active),
-    page_number: Number(r.page_number) || 1
+    page_number: Number(r.page_number) || 1,
+    category: r.category || 'general'
   }));
 }
 
@@ -568,8 +605,8 @@ app.post('/api/questions', requireAdmin, async function (req, res) {
 
     const pageNum = Number.isInteger(req.body.page_number) && req.body.page_number >= 1 ? req.body.page_number : 1;
     const inserted = await db.query(
-      'INSERT INTO survey_questions(question_key, label, type, required, options, min_value, max_value, order_no, is_active, is_deleted, page_number) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,FALSE,$10) RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number',
-      [q.key, q.label, q.type, q.required, JSON.stringify(q.options), q.min_value, q.max_value, orderNo, q.is_active, pageNum]
+      'INSERT INTO survey_questions(question_key, label, type, required, options, min_value, max_value, order_no, is_active, is_deleted, page_number, category) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,FALSE,$10,$11) RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category',
+      [q.key, q.label, q.type, q.required, JSON.stringify(q.options), q.min_value, q.max_value, orderNo, q.is_active, pageNum, q.category]
     );
 
     return res.json({ question: inserted.rows[0] });
@@ -603,7 +640,8 @@ app.patch('/api/questions/:id', requireAdmin, async function (req, res) {
       max_value: req.body.max === undefined ? source.max_value : Number(req.body.max),
       order_no: req.body.order_no === undefined ? source.order_no : Number(req.body.order_no),
       is_active: req.body.is_active === undefined ? source.is_active : Boolean(req.body.is_active),
-      page_number: req.body.page_number === undefined ? Number(source.page_number) || 1 : Number(req.body.page_number)
+      page_number: req.body.page_number === undefined ? Number(source.page_number) || 1 : Number(req.body.page_number),
+      category: req.body.category === 'doctor' ? 'doctor' : (req.body.category === 'general' ? 'general' : (source.category || 'general'))
     };
 
     if (!QUESTION_TYPES.has(merged.type)) return res.status(400).json({ error: 'invalid_question_type' });
@@ -612,8 +650,8 @@ app.patch('/api/questions/:id', requireAdmin, async function (req, res) {
     }
 
     const updated = await db.query(
-      'UPDATE survey_questions SET question_key=$1,label=$2,type=$3,required=$4,options=$5::jsonb,min_value=$6,max_value=$7,order_no=$8,is_active=$9,page_number=$10,updated_at=NOW() WHERE id=$11 RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number',
-      [merged.key, merged.label, merged.type, merged.required, JSON.stringify(merged.options || []), merged.min_value, merged.max_value, merged.order_no, merged.is_active, merged.page_number, id]
+      'UPDATE survey_questions SET question_key=$1,label=$2,type=$3,required=$4,options=$5::jsonb,min_value=$6,max_value=$7,order_no=$8,is_active=$9,page_number=$10,category=$11,updated_at=NOW() WHERE id=$12 RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category',
+      [merged.key, merged.label, merged.type, merged.required, JSON.stringify(merged.options || []), merged.min_value, merged.max_value, merged.order_no, merged.is_active, merged.page_number, merged.category, id]
     );
 
     return res.json({ question: updated.rows[0] });
@@ -677,12 +715,24 @@ app.get('/api/survey', async function (req, res) {
   if (survey.error) return res.status(400).json({ error: survey.error });
 
   await ensureQuestionsTableAndDefaults();
-  const questions = await fetchQuestions({ includeInactive: false });
+  
+  const doctorQuestions = await fetchQuestions({ includeInactive: false, category: 'doctor' });
+  const generalQuestions = await fetchQuestions({ includeInactive: false, category: 'general' });
 
   return res.json({
     patient_name: survey.patient_name,
     doctors: survey.doctors,
-    questions: questions.map((q) => ({
+    doctor_questions: doctorQuestions.map((q) => ({
+      id: q.key,
+      type: q.type,
+      label: q.label,
+      required: q.required,
+      options: q.options,
+      min: q.min_value,
+      max: q.max_value,
+      page_number: q.page_number
+    })),
+    general_questions: generalQuestions.map((q) => ({
       id: q.key,
       type: q.type,
       label: q.label,
@@ -698,8 +748,6 @@ app.get('/api/survey', async function (req, res) {
 app.post('/api/feedback', async function (req, res) {
   try {
     const token = req.body.token;
-    const ratings = req.body.ratings;
-    const comment = req.body.comment;
     const questionAnswers = req.body.question_answers || {};
 
     if (!token) return res.status(400).json({ error: 'token_required' });
@@ -707,40 +755,18 @@ app.post('/api/feedback', async function (req, res) {
     const survey = await validateTokenFromSourceAPI(token);
     if (survey.error) return res.status(400).json({ error: survey.error });
 
-    if (!Array.isArray(ratings) || ratings.length !== survey.doctors.length) {
-      return res.status(400).json({ error: 'all_doctors_must_be_rated' });
-    }
-
-    for (const item of ratings) {
-      if (!item.rating || !Number.isInteger(item.rating) || item.rating < 1 || item.rating > 5) {
-        return res.status(400).json({ error: 'invalid_rating_value' });
-      }
-    }
-
-    await ensureQuestionsTableAndDefaults();
-    const questions = await fetchQuestions({ includeInactive: false });
-    const qValidation = validateQuestionAnswers(questionAnswers, questions);
-    if (!qValidation.ok) return res.status(400).json({ error: qValidation.error });
+    const doctorNames = survey.doctors ? survey.doctors.map(d => d.doctor_name).join(', ') : '';
 
     const client = await db.pool.connect();
     try {
       await client.query('BEGIN');
 
       const sub = await client.query(
-        'INSERT INTO feedback_submissions(token, visit_id, patient_id, comment, question_answers, patient_name) VALUES($1, $2, $3, $4, $5::jsonb, $6) RETURNING id',
-        [token, survey.visit_id, survey.patient_id || null, comment || null, JSON.stringify(questionAnswers), survey.patient_name]
+        'INSERT INTO feedback_submissions(token, visit_id, patient_id, patient_name, doctor_names, question_answers) VALUES($1, $2, $3, $4, $5, $6::jsonb) RETURNING id',
+        [token, survey.visit_id, survey.patient_id || null, survey.patient_name, doctorNames, JSON.stringify(questionAnswers)]
       );
 
       const submissionId = sub.rows[0].id;
-
-      for (let i = 0; i < survey.doctors.length; i++) {
-        const doctor = survey.doctors[i];
-        const ratingItem = ratings[i];
-        await client.query(
-          'INSERT INTO feedback_ratings(submission_id, doctor_id, doctor_name, rating) VALUES($1, $2, $3, $4)',
-          [submissionId, ratingItem.doctor_id, doctor.doctor_name, ratingItem.rating]
-        );
-      }
 
       await client.query('COMMIT');
       
@@ -775,21 +801,14 @@ app.get('/api/responses', requireAdmin, async function (req, res) {
     conditions.push(`(
       fs.patient_name ILIKE $${paramIdx} OR
       fs.visit_id ILIKE $${paramIdx} OR
-      fs.comment ILIKE $${paramIdx} OR
-      EXISTS (
-        SELECT 1 FROM feedback_ratings fr2
-        WHERE fr2.submission_id = fs.id AND fr2.doctor_name ILIKE $${paramIdx}
-      )
+      fs.doctor_names ILIKE $${paramIdx}
     )`);
     params.push('%' + search + '%');
     paramIdx++;
   }
 
   if (doctorId) {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM feedback_ratings fr2
-      WHERE fr2.submission_id = fs.id AND (fr2.doctor_id = $${paramIdx} OR fr2.doctor_name ILIKE $${paramIdx})
-    )`);
+    conditions.push(`fs.doctor_names ILIKE $${paramIdx}`);
     params.push('%' + doctorId + '%');
     paramIdx++;
   }
@@ -810,11 +829,10 @@ app.get('/api/responses', requireAdmin, async function (req, res) {
 
   if (!grouped) {
     let sql = `SELECT fs.id AS submission_id, fs.submitted_at, fs.visit_id, fs.patient_name,
-               fr.doctor_name, fr.rating, fs.comment, fs.question_answers
+               fs.comment, fs.question_answers
                FROM feedback_submissions fs
-               JOIN feedback_ratings fr ON fr.submission_id = fs.id
                ${whereClause}
-               ORDER BY fs.submitted_at DESC, fs.id DESC, fr.doctor_name ASC`;
+               ORDER BY fs.submitted_at DESC, fs.id DESC`;
     const rows = await db.query(sql, params);
     return res.json({ count: rows.rowCount, responses: rows.rows });
   }
@@ -826,42 +844,30 @@ app.get('/api/responses', requireAdmin, async function (req, res) {
   const offset = (page - 1) * limit;
 
   let sql = `SELECT fs.id AS submission_id, fs.submitted_at, fs.visit_id, fs.patient_name,
-             fs.comment, fs.question_answers, fr.doctor_id, fr.doctor_name, fr.rating
+             fs.doctor_names, fs.comment, fs.question_answers
              FROM feedback_submissions fs
-             JOIN feedback_ratings fr ON fr.submission_id = fs.id
              ${whereClause}
-             ORDER BY fs.submitted_at DESC, fs.id DESC, fr.doctor_name ASC
+             ORDER BY fs.submitted_at DESC, fs.id DESC
              LIMIT ${limit} OFFSET ${offset}`;
   const rows = await db.query(sql, params);
 
-  const map = new Map();
-  for (const row of rows.rows) {
-    if (!map.has(row.submission_id)) {
-      map.set(row.submission_id, {
-        submission_id: row.submission_id,
-        submitted_at: row.submitted_at,
-        visit_id: row.visit_id,
-        patient_name: row.patient_name,
-        comment: row.comment,
-        question_answers: row.question_answers || {},
-        ratings: []
-      });
-    }
-
-    map.get(row.submission_id).ratings.push({
-      doctor_id: row.doctor_id,
-      doctor_name: row.doctor_name,
-      rating: Number(row.rating)
-    });
-  }
+  const responses = rows.rows.map((row) => ({
+    submission_id: row.submission_id,
+    submitted_at: row.submitted_at,
+    visit_id: row.visit_id,
+    patient_name: row.patient_name,
+    doctor_names: row.doctor_names,
+    comment: row.comment,
+    question_answers: row.question_answers || {}
+  }));
 
   return res.json({
-    count: map.size,
+    count: responses.length,
     total: totalCount,
     page,
     limit,
     total_pages: totalPages,
-    responses: Array.from(map.values())
+    responses: responses
   });
 });
 
@@ -907,15 +913,81 @@ app.get('/api/doctors/list', requireAdmin, async function (_req, res) {
 });
 
 app.get('/api/analytics', requireAdmin, async function (_req, res) {
-  const doctorAverages = await db.query(
-    'SELECT fr.doctor_id, fr.doctor_name, ROUND(AVG(fr.rating)::numeric, 2) AS avg_rating, COUNT(*)::int AS rating_count FROM feedback_ratings fr GROUP BY fr.doctor_id, fr.doctor_name ORDER BY avg_rating DESC, rating_count DESC, fr.doctor_name ASC'
+  const totals = await db.query('SELECT COUNT(*)::int AS total_submissions FROM feedback_submissions');
+
+  const submissions = await db.query(
+    'SELECT fs.question_answers, fs.doctor_names FROM feedback_submissions fs'
   );
 
-  const totals = await db.query('SELECT COUNT(*)::int AS total_submissions FROM feedback_submissions');
+  const doctorStats = {};
+  
+  for (const row of submissions.rows) {
+    const qa = row.question_answers || {};
+    const doctorNamesList = row.doctor_names ? row.doctor_names.split(', ') : [];
+    
+    const idToNameMap = {};
+    let doctorIndex = 0;
+    
+    for (const key of Object.keys(qa)) {
+      const match = key.match(/^doctor_(D\d+)_/);
+      if (match) {
+        const doctorId = match[1];
+        if (!idToNameMap[doctorId]) {
+          idToNameMap[doctorId] = doctorNamesList[doctorIndex] || doctorId;
+          doctorIndex++;
+        }
+      }
+    }
+    
+    for (const key of Object.keys(qa)) {
+      const match = key.match(/^doctor_(D\d+)_(.+)$/);
+      if (match) {
+        const doctorId = match[1];
+        const questionKey = match[2];
+        const doctorName = idToNameMap[doctorId] || doctorId;
+        const value = qa[key];
+        
+        if (!doctorStats[doctorName]) {
+          doctorStats[doctorName] = {
+            doctor_id: doctorId,
+            doctor_name: doctorName,
+            question_ratings: {}
+          };
+        }
+        
+        if (typeof value === 'number' && value >= 1 && value <= 5) {
+          if (!doctorStats[doctorName].question_ratings[questionKey]) {
+            doctorStats[doctorName].question_ratings[questionKey] = [];
+          }
+          doctorStats[doctorName].question_ratings[questionKey].push(value);
+        }
+      }
+    }
+  }
+
+  const doctorAverages = Object.values(doctorStats).map(d => {
+    const allRatings = [];
+    const questionRatings = {};
+    for (const [qKey, ratings] of Object.entries(d.question_ratings)) {
+      const avg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
+      questionRatings[qKey] = Math.round(avg * 100) / 100;
+      allRatings.push(...ratings);
+    }
+    const avg = allRatings.length > 0 
+      ? allRatings.reduce((a, b) => a + b, 0) / allRatings.length 
+      : 0;
+    return {
+      doctor_id: d.doctor_id,
+      doctor_name: d.doctor_name,
+      avg_rating: allRatings.length > 0 ? Math.round(avg * 100) / 100 : null,
+      rating_count: allRatings.length,
+      question_ratings: questionRatings
+    };
+  }).sort((a, b) => (b.avg_rating || 0) - (a.avg_rating || 0));
 
   return res.json({
     total_submissions: totals.rows[0] ? totals.rows[0].total_submissions : 0,
-    doctor_averages: doctorAverages.rows
+    doctor_averages: doctorAverages
   });
 });
 
