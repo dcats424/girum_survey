@@ -5,6 +5,13 @@ body {
   @apply antialiased;
 }
 
+.login-bg {
+  background-image: url('http://localhost:3000/medicalimage.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
 .sidebar-gradient {
   background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
 }

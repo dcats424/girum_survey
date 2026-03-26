@@ -12,16 +12,198 @@ import {
   BarChart3, Activity, ArrowUpDown, Calendar, 
   ThumbsUp, ThumbsDown, MessageCircle, Sparkles,
   Heart, Send, CheckCircle2, Circle, ArrowRight,
-  ClipboardList, HeartPulse, Shield, Award, ChevronDown, FileSpreadsheet
+  ClipboardList, HeartPulse, Shield, Award, ChevronDown, FileSpreadsheet,
+  Bell, LogOut, Settings, UserCog, History, Edit, ToggleLeft, ToggleRight, Power, Mail
 } from 'lucide-react';
 
 const isAdmin = window.location.pathname.startsWith('/admin');
 
+const SESSION_TOKEN_KEY = 'admin_session_token';
+const ADMIN_USER_KEY = 'admin_user';
+
+function LoginPage({ onLogin }) {
+  const [isRegister, setIsRegister] = React.useState(false);
+  const [username, setUsername] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [hasUsers, setHasUsers] = React.useState(null);
+
+  React.useEffect(() => {
+    async function checkUsers() {
+      try {
+        const res = await fetch('/api/auth/check', { method: 'GET' });
+        const data = await res.json();
+        if (res.ok) setHasUsers(data.has_users);
+      } catch (e) {
+        setHasUsers(true);
+      }
+    }
+    checkUsers();
+  }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (isRegister) {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        
+        const loginRes = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const loginData = await loginRes.json();
+        if (!loginRes.ok) throw new Error(loginData.error || 'Login failed');
+        
+        localStorage.setItem(SESSION_TOKEN_KEY, loginData.token);
+        localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(loginData.user));
+        onLogin(loginData.token, loginData.user);
+      } else {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        
+        localStorage.setItem(SESSION_TOKEN_KEY, data.token);
+        localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(data.user));
+        onLogin(data.token, data.user);
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (hasUsers === null) {
+    return (
+      <div className="min-h-screen login-bg flex items-center justify-center p-4">
+        <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  const showRegister = !hasUsers;
+
+  return (
+    <div className="min-h-screen login-bg flex items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        <div className="bg-white/40 backdrop-blur-xl rounded-3xl p-10 shadow-2xl border border-white/50">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg">
+              <Shield className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h1>
+            <p className="text-gray-600">{showRegister ? 'Create your admin account' : 'Sign in to your account'}</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full px-5 py-4 bg-gray-100/80 backdrop-blur border border-gray-300 rounded-xl text-gray-900 placeholder-gray-500 outline-none focus:bg-white focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 transition-all"
+                placeholder="Username"
+                required
+              />
+            </div>
+            
+            {showRegister && (
+              <div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-5 py-4 bg-gray-100/80 backdrop-blur border border-gray-300 rounded-xl text-gray-900 placeholder-gray-500 outline-none focus:bg-white focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 transition-all"
+                  placeholder="Email"
+                  required
+                />
+              </div>
+            )}
+
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-5 py-4 bg-gray-100/80 backdrop-blur border border-gray-300 rounded-xl text-gray-900 placeholder-gray-500 outline-none focus:bg-white focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 transition-all pr-12"
+                placeholder="Password"
+                required
+                minLength={6}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-xl font-bold hover:from-cyan-600 hover:to-blue-600 disabled:opacity-50 transition-all shadow-lg shadow-cyan-200 mt-4"
+            >
+              {loading ? 'Please wait...' : (showRegister ? 'Create Account' : 'Sign In')}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [authToken, setAuthToken] = React.useState(() => localStorage.getItem(SESSION_TOKEN_KEY));
+  const [currentUser, setCurrentUser] = React.useState(() => {
+    const stored = localStorage.getItem(ADMIN_USER_KEY);
+    return stored ? JSON.parse(stored) : null;
+  });
+
+  function handleLogin(token, user) {
+    setAuthToken(token);
+    setCurrentUser(user);
+  }
+
+  function handleLogout() {
+    fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'x-session-token': authToken }
+    }).finally(() => {
+      localStorage.removeItem(SESSION_TOKEN_KEY);
+      localStorage.removeItem(ADMIN_USER_KEY);
+      setAuthToken(null);
+      setCurrentUser(null);
+    });
+  }
+
+  if (isAdmin && !authToken) {
+    return (
+      <>
+        <ToastContainer position="top-right" autoClose={3000} />
+        <LoginPage onLogin={handleLogin} />
+      </>
+    );
+  }
+
   return (
     <>
       <ToastContainer position="top-right" autoClose={3000} />
-      {isAdmin ? <AdminDashboard /> : <SurveyPage />}
+      {isAdmin ? <AdminDashboard authToken={authToken} currentUser={currentUser} onLogout={handleLogout} /> : <SurveyPage />}
     </>
   );
 }
@@ -721,19 +903,30 @@ function SurveyPage() {
   );
 }
 
-function AdminDashboard() {
+function AdminDashboard({ authToken, currentUser, onLogout }) {
   const [activeTab, setActiveTab] = React.useState('dashboard');
   const [message, setMessage] = React.useState({ type: '', text: '' });
   const [analytics, setAnalytics] = React.useState(null);
   const [responses, setResponses] = React.useState([]);
   const [questions, setQuestions] = React.useState([]);
   const [doctorsList, setDoctorsList] = React.useState([]);
-  const adminKey = localStorage.getItem('admin_key') || '';
+  const [users, setUsers] = React.useState([]);
+  const [showUserModal, setShowUserModal] = React.useState(false);
+  const [newUser, setNewUser] = React.useState({ username: '', email: '', password: '' });
+  const [userLoading, setUserLoading] = React.useState(false);
+  const [showNotifications, setShowNotifications] = React.useState(false);
+  const [notifications, setNotifications] = React.useState([]);
+  const [hasNewNotifications, setHasNewNotifications] = React.useState(false);
+  const [editUserModal, setEditUserModal] = React.useState({ isOpen: false, user: null });
+  const [editUserData, setEditUserData] = React.useState({ username: '', email: '', password: '', is_active: true });
+  const [activityLogs, setActivityLogs] = React.useState([]);
+  const [userDeleteModal, setUserDeleteModal] = React.useState({ isOpen: false, user: null });
 
   const [filters, setFilters] = React.useState({ search: '', date_from: '', date_to: '' });
+  const [searchInput, setSearchInput] = React.useState('');
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [loadingResponses, setLoadingResponses] = React.useState(false);
-  const [pagination, setPagination] = React.useState({ page: 1, limit: 20, total: 0, total_pages: 0 });
+  const [pagination, setPagination] = React.useState({ page: 1, limit: 5, total: 0, total_pages: 0 });
 
   const [newQuestion, setNewQuestion] = React.useState({
     key: '',
@@ -760,7 +953,161 @@ function AdminDashboard() {
   };
 
   function headers() {
-    return adminKey ? { 'x-admin-key': adminKey } : {};
+    return authToken ? { 'x-session-token': authToken } : {};
+  }
+
+  async function fetchUsers() {
+    try {
+      const res = await fetch('/api/admin/users', { headers: headers() });
+      const data = await res.json();
+      if (res.ok) setUsers(data.users || []);
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+    }
+  }
+
+  async function handleCreateUser(e) {
+    e.preventDefault();
+    setUserLoading(true);
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify(newUser)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      toast.success('User created successfully');
+      setNewUser({ username: '', email: '', password: '' });
+      setShowUserModal(false);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setUserLoading(false);
+    }
+  }
+
+  async function handleDeleteUser(id) {
+    try {
+      const res = await fetch('/api/admin/users/' + id, {
+        method: 'DELETE',
+        headers: headers()
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      toast.success('User deleted');
+      setUserDeleteModal({ isOpen: false, user: null });
+      fetchUsers();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  function confirmDeleteUser(user) {
+    setUserDeleteModal({ isOpen: true, user });
+  }
+
+  function handleOpenEditUser(user) {
+    setEditUserData({
+      username: user.username,
+      email: user.email,
+      password: '',
+      is_active: user.is_active
+    });
+    setEditUserModal({ isOpen: true, user });
+  }
+
+  async function handleUpdateUser(e) {
+    e.preventDefault();
+    setUserLoading(true);
+    try {
+      const updates = {};
+      if (editUserData.username !== editUserModal.user.username) updates.username = editUserData.username;
+      if (editUserData.email !== editUserModal.user.email) updates.email = editUserData.email;
+      if (editUserData.password) updates.password = editUserData.password;
+      if (editUserData.is_active !== editUserModal.user.is_active) updates.is_active = editUserData.is_active;
+
+      const res = await fetch('/api/admin/users/' + editUserModal.user.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      toast.success('User updated successfully');
+      setEditUserModal({ isOpen: false, user: null });
+      fetchUsers();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setUserLoading(false);
+    }
+  }
+
+  async function fetchActivityLogs() {
+    try {
+      const res = await fetch('/api/admin/activity-logs?limit=50', { headers: headers() });
+      const data = await res.json();
+      if (res.ok) setActivityLogs(data.logs || []);
+    } catch (err) {
+      console.error('Failed to fetch activity logs:', err);
+    }
+  }
+
+  React.useEffect(() => {
+    if (activeTab === 'users') fetchUsers();
+    if (activeTab === 'activity') fetchActivityLogs();
+  }, [activeTab]);
+
+  const LAST_SEEN_KEY = 'last_seen_response_id';
+  
+  React.useEffect(() => {
+    let lastKnownId = parseInt(localStorage.getItem(LAST_SEEN_KEY) || '0');
+    
+    async function pollForNewResponses() {
+      try {
+        const res = await fetch('/api/responses?grouped=true&page=1&limit=20', { headers: headers() });
+        const data = await res.json();
+        if (res.ok && data.responses && data.responses.length > 0) {
+          const latestId = Math.max(...data.responses.map(r => r.submission_id));
+          
+          const newResponses = data.responses.filter(r => r.submission_id > lastKnownId);
+          
+          if (newResponses.length > 0) {
+            setNotifications(prev => {
+              const existingIds = new Set(prev.map(n => n.submission_id));
+              const uniqueNew = newResponses.filter(n => !existingIds.has(n.submission_id));
+              return [...uniqueNew, ...prev].slice(0, 10);
+            });
+            setHasNewNotifications(true);
+            toast.success(`${newResponses.length} new response${newResponses.length > 1 ? 's' : ''} received!`);
+          }
+          
+          localStorage.setItem(LAST_SEEN_KEY, String(latestId));
+          lastKnownId = latestId;
+        }
+      } catch (err) {
+        console.error('Poll error:', err);
+      }
+    }
+
+    pollForNewResponses();
+    const interval = setInterval(pollForNewResponses, 15000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
+  function handleOpenNotifications() {
+    setShowNotifications(!showNotifications);
+    if (!showNotifications && !hasNewNotifications) {
+      setShowNotifications(true);
+    }
+  }
+
+  function handleCloseNotifications() {
+    setShowNotifications(false);
+    setHasNewNotifications(false);
+    setNotifications([]);
   }
 
   function formatAnswerValue(value) {
@@ -803,7 +1150,7 @@ function AdminDashboard() {
 
       const [aRes, rRes, qRes, dRes] = await Promise.all([
         fetch('/api/analytics', { headers: headers() }),
-        fetch(`/api/responses?grouped=true&page=1&limit=20`, { headers: headers() }),
+        fetch(`/api/responses?grouped=true&page=1&limit=${pagination.limit}`, { headers: headers() }),
         fetch('/api/questions?all=true', { headers: headers() }),
         fetch('/api/doctors/list', { headers: headers() })
       ]);
@@ -824,16 +1171,13 @@ function AdminDashboard() {
           if (!seen.has(d.id)) {
             seen.add(d.id);
             uniqueDoctors.push(d);
-}
-    }
-  }
-
-  function deleteSelected() {
-    openDeleteModal();
-  }
+          }
+        }
+        setDoctorsList(uniqueDoctors);
+      }
       setPagination({
         page: rData.page || 1,
-        limit: rData.limit || 20,
+        limit: rData.limit || pagination.limit,
         total: rData.total || 0,
         total_pages: rData.total_pages || 0
       });
@@ -1209,6 +1553,7 @@ function AdminDashboard() {
 
   function clearFilters() {
     setFilters({ search: '', date_from: '', date_to: '' });
+    setSearchInput('');
     handleFilterChange({ search: '', date_from: '', date_to: '' });
   }
 
@@ -1230,7 +1575,10 @@ function AdminDashboard() {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'questions', label: 'Questions', icon: FileText },
-    { id: 'responses', label: 'Responses', icon: MessageSquare }
+    { id: 'responses', label: 'Responses', icon: MessageSquare },
+    { id: 'doctor-ratings', label: 'Doctor Ratings', icon: Star },
+    { id: 'users', label: 'User Management', icon: UserCog },
+    { id: 'activity', label: 'Activity Log', icon: History }
   ];
 
   return (
@@ -1277,7 +1625,108 @@ function AdminDashboard() {
         </div>
       </aside>
 
-      <main className="flex-1 ml-64 p-8 overflow-hidden">
+      <main className="flex-1 ml-64 overflow-hidden">
+        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-30">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800 capitalize">{activeTab === 'dashboard' ? 'Dashboard' : activeTab}</h2>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <button
+                onClick={handleOpenNotifications}
+                className={`relative p-3 rounded-xl transition-all ${hasNewNotifications ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-100'}`}
+              >
+                <Bell className={`w-6 h-6 ${hasNewNotifications ? 'text-red-500' : 'text-gray-600'}`} />
+                {hasNewNotifications && (
+                  <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-lg animate-bounce">
+                    {notifications.length > 9 ? '9+' : notifications.length}
+                  </span>
+                )}
+              </button>
+              {showNotifications && (
+                <div className="fixed inset-0 z-40" onClick={handleCloseNotifications}></div>
+              )}
+              {showNotifications && hasNewNotifications && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden z-50">
+                  <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-slate-800 to-slate-900 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-white">New Responses</h3>
+                      <p className="text-slate-400 text-sm">{notifications.length} new response{notifications.length > 1 ? 's' : ''}</p>
+                    </div>
+                    <button onClick={handleCloseNotifications} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
+                      <X className="w-5 h-5 text-white" />
+                    </button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.map((r, idx) => (
+                      <div 
+                        key={r.submission_id} 
+                        className={`p-4 border-b border-gray-100 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all cursor-pointer ${idx === 0 ? 'bg-blue-50' : ''}`} 
+                        onClick={() => { setActiveTab('responses'); handleCloseNotifications(); }}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${idx === 0 ? 'bg-red-500' : 'bg-emerald-500'}`}>
+                            <MessageSquare className="w-5 h-5 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-gray-800 truncate">{r.patient_name}</p>
+                            <p className="text-sm text-gray-600 truncate font-medium">{r.doctor_names || 'No doctor assigned'}</p>
+                            <p className="text-xs text-gray-500 mt-1">{new Date(r.submitted_at).toLocaleString()}</p>
+                          </div>
+                          {idx === 0 && <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full">NEW</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="p-3 bg-gray-50 border-t border-gray-100">
+                    <button 
+                      onClick={() => { setActiveTab('responses'); handleCloseNotifications(); }}
+                      className="w-full py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg"
+                    >
+                      View All Responses
+                    </button>
+                  </div>
+                </div>
+              )}
+              {showNotifications && !hasNewNotifications && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden z-50">
+                  <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-slate-800 to-slate-900 flex items-center justify-between">
+                    <h3 className="font-bold text-white">Notifications</h3>
+                    <button onClick={handleCloseNotifications} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
+                      <X className="w-5 h-5 text-white" />
+                    </button>
+                  </div>
+                  <div className="p-8 text-center">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Bell className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <p className="text-gray-500 font-medium">No new notifications</p>
+                    <p className="text-gray-400 text-sm mt-1">New responses will appear here</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="h-8 w-px bg-gray-200"></div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
+                {currentUser?.username?.[0]?.toUpperCase() || 'A'}
+              </div>
+              <div className="hidden md:block">
+                <p className="text-sm font-medium text-gray-800">{currentUser?.username || 'Admin'}</p>
+                <p className="text-xs text-gray-500">{currentUser?.email || ''}</p>
+              </div>
+            </div>
+            <button
+              onClick={onLogout}
+              className="p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-500 hover:text-red-500"
+              title="Sign Out"
+            >
+              <Power className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+
+        <div className="p-8">
         {message.text && (
           <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 animate-fade-in ${
             message.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' :
@@ -1728,9 +2177,12 @@ function AdminDashboard() {
               <div className="p-5 border-b border-gray-100">
                 <div className="flex flex-wrap gap-3">
                   <div className="flex-1 min-w-[200px] max-w-[400px]">
-                    <div className="relative">
+                    <div className="relative flex">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <input type="text" placeholder="Search patient name or doctor name..." value={filters.search} onChange={(e) => handleFilterChange({ ...filters, search: e.target.value })} className="w-full pl-10 pr-4 py-2.5 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 text-sm transition-all" />
+                      <input type="text" placeholder="Search patient name or doctor name..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { handleFilterChange({ ...filters, search: searchInput }); } }} className="w-full pl-10 pr-14 py-2.5 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 text-sm transition-all" />
+                      <button onClick={() => handleFilterChange({ ...filters, search: searchInput })} className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium">
+                        Search
+                      </button>
                     </div>
                   </div>
                   <input type="date" value={filters.date_from} onChange={(e) => handleFilterChange({ ...filters, date_from: e.target.value })} className="px-4 py-2.5 border-2 border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500" />
@@ -1829,6 +2281,7 @@ function AdminDashboard() {
                 <p className="text-sm text-gray-500">Showing {Math.min((pagination.page - 1) * pagination.limit + 1, pagination.total)} - {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}</p>
                 <div className="flex items-center gap-2">
                   <select value={pagination.limit} onChange={(e) => { setPagination((p) => ({ ...p, limit: Number(e.target.value), page: 1 })); fetchResponsesWithFilters(1, filters); }} className="px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value={5}>5 / page</option>
                     <option value={10}>10 / page</option>
                     <option value={20}>20 / page</option>
                     <option value={50}>50 / page</option>
@@ -1842,6 +2295,299 @@ function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {activeTab === 'users' && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-800">User Management</h2>
+                <p className="text-gray-500">Manage admin users and permissions</p>
+              </div>
+              <button
+                onClick={() => setShowUserModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg shadow-blue-200"
+              >
+                <Plus className="w-5 h-5" /> Add New User
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Username</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Email</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Created At</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Status</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {users.map((user) => (
+                    <tr key={user.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                            <span className="text-blue-600 font-semibold">{user.username[0].toUpperCase()}</span>
+                          </div>
+                          <span className="font-medium text-gray-800">{user.username}</span>
+                          {user.id === currentUser?.id && <span className="px-2 py-1 bg-blue-100 text-blue-600 text-xs rounded-full">You</span>}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-gray-600">{user.email}</td>
+                      <td className="px-6 py-4 text-gray-600">{new Date(user.created_at).toLocaleDateString()}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${user.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                          {user.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenEditUser(user)}
+                            className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Edit User"
+                          >
+                            <Edit3 className="w-5 h-5" />
+                          </button>
+                          {user.id !== currentUser?.id && (
+                            <button
+                              onClick={() => confirmDeleteUser(user)}
+                              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete User"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {users.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-gray-500">No users found</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {editUserModal.isOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setEditUserModal({ isOpen: false, user: null })}>
+            <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-modal shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-gray-800">Edit User</h3>
+                <button onClick={() => setEditUserModal({ isOpen: false, user: null })} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleUpdateUser} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    value={editUserData.username}
+                    onChange={(e) => setEditUserData({ ...editUserData, username: e.target.value })}
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Enter username"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={editUserData.email}
+                    onChange={(e) => setEditUserData({ ...editUserData, email: e.target.value })}
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Enter email"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                  <input
+                    type="password"
+                    value={editUserData.password}
+                    onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Leave empty to keep current password"
+                    minLength={6}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-700">Active Status</label>
+                  <button
+                    type="button"
+                    onClick={() => setEditUserData({ ...editUserData, is_active: !editUserData.is_active })}
+                    className="relative inline-flex h-8 w-14 items-center rounded-full transition-colors"
+                  >
+                    {editUserData.is_active ? (
+                      <ToggleRight className="w-10 h-10 text-emerald-500" />
+                    ) : (
+                      <ToggleLeft className="w-10 h-10 text-gray-300" />
+                    )}
+                  </button>
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setEditUserModal({ isOpen: false, user: null })}
+                    className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={userLoading}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold rounded-xl transition-all shadow-lg"
+                  >
+                    {userLoading ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'activity' && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-800">Activity Log</h2>
+                <p className="text-gray-500">Track all admin actions and changes</p>
+              </div>
+              <button
+                onClick={fetchActivityLogs}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all"
+              >
+                <RefreshCw className="w-4 h-4" /> Refresh
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">User</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Action</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Details</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Date & Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {activityLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                              <span className="text-blue-600 font-semibold text-sm">{log.username?.[0]?.toUpperCase() || '?'}</span>
+                            </div>
+                            <span className="font-medium text-gray-800">{log.username || 'Unknown'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            log.action.includes('create') ? 'bg-emerald-100 text-emerald-700' :
+                            log.action.includes('update') ? 'bg-blue-100 text-blue-700' :
+                            log.action.includes('delete') ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {log.action.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-600 text-sm max-w-xs truncate">
+                          {log.details ? JSON.stringify(log.details) : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-gray-500 text-sm">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                    {activityLogs.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-6 py-12 text-center text-gray-500">No activity logs yet</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'doctor-ratings' && (
+          <DoctorRatingsPage showMessage={showMessage} />
+        )}
+
+        {showUserModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowUserModal(false)}>
+            <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-modal shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-gray-800">Add New User</h3>
+                <button onClick={() => setShowUserModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                  <input
+                    type="text"
+                    value={newUser.username}
+                    onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Enter username"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Enter email"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                    className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    placeholder="Enter password (min 6 characters)"
+                    required
+                    minLength={6}
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowUserModal(false)}
+                    className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={userLoading}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold rounded-xl transition-all shadow-lg"
+                  >
+                    {userLoading ? 'Creating...' : 'Create User'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+        </div>
       </main>
       <DeleteModal
         isOpen={deleteModal.isOpen}
@@ -1859,6 +2605,489 @@ function AdminDashboard() {
         message={`Are you sure you want to delete ${responseDeleteModal.count} response(s)? This action cannot be undone.`}
         type="danger"
       />
+      {userDeleteModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setUserDeleteModal({ isOpen: false, user: null })}>
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-modal shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Delete User</h3>
+              <p className="text-gray-500 mb-6">Are you sure you want to delete "{userDeleteModal.user?.username}"? This action cannot be undone.</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setUserDeleteModal({ isOpen: false, user: null })}
+                  className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => handleDeleteUser(userDeleteModal.user.id)}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-semibold rounded-xl transition-all shadow-lg"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DoctorRatingsPage({ showMessage }) {
+  const [doctorRatings, setDoctorRatings] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [hasSearched, setHasSearched] = React.useState(false);
+  const [sendingEmail, setSendingEmail] = React.useState(null);
+  const [searchInput, setSearchInput] = React.useState('');
+  const [dateFrom, setDateFrom] = React.useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [dateTo, setDateTo] = React.useState(() => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
+  });
+  const [emailModal, setEmailModal] = React.useState({ isOpen: false, doctor: null });
+  const [emailForm, setEmailForm] = React.useState({ email: '' });
+  const authToken = localStorage.getItem('admin_session_token');
+
+  function formatDisplayDate(dateStr) {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  function parseInputDate(str) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return str;
+  }
+
+  function headers() {
+    return authToken ? { 'x-session-token': authToken } : {};
+  }
+
+  async function fetchRatings(doctorName, fromDate, toDate) {
+    setLoading(true);
+    setHasSearched(true);
+    try {
+      const params = new URLSearchParams();
+      if (doctorName) params.set('doctor_name', doctorName);
+      if (fromDate) params.set('date_from', fromDate);
+      if (toDate) params.set('date_to', toDate);
+
+      const res = await fetch('/api/doctor-ratings?' + params.toString(), { headers: headers() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setDoctorRatings(data.ratings || []);
+    } catch (err) {
+      showMessage(err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleSearch(e) {
+    e.preventDefault();
+    fetchRatings(searchInput, dateFrom, dateTo);
+  }
+
+  function handleClear() {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setSearchInput('');
+    setDateFrom(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`);
+    setDateTo(`${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`);
+    setDoctorRatings([]);
+    setHasSearched(false);
+  }
+
+  function getRatingBg(rating) {
+    if (rating >= 4.5) return 'bg-emerald-100 text-emerald-700';
+    if (rating >= 3.5) return 'bg-blue-100 text-blue-700';
+    if (rating >= 2.5) return 'bg-amber-100 text-amber-700';
+    return 'bg-red-100 text-red-700';
+  }
+
+  async function openEmailModal(doctor) {
+    // Try to fetch doctor email from Source System API
+    let doctorEmail = doctor.email || '';
+    
+    try {
+      const res = await fetch(`/api/doctors/info?doctor_id=${doctor.doctor_id}`, { headers: headers() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.email) {
+          doctorEmail = data.email;
+        }
+      }
+    } catch (e) {
+      // Use existing email or empty
+    }
+    
+    setEmailForm({ email: doctorEmail });
+    setEmailModal({ isOpen: true, doctor });
+  }
+
+  async function handleSendEmail(e) {
+    e.preventDefault();
+    if (!emailForm.email) {
+      showMessage('Email is required', 'error');
+      return;
+    }
+
+    setSendingEmail(emailModal.doctor.doctor_id);
+    try {
+      const res = await fetch('/api/doctor-ratings/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers() },
+        body: JSON.stringify({
+          ...emailModal.doctor,
+          email: emailForm.email,
+          date_from: dateFrom,
+          date_to: dateTo
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      showMessage('Email sent successfully!', 'success');
+      setEmailModal({ isOpen: false, doctor: null });
+    } catch (err) {
+      showMessage(err.message, 'error');
+    } finally {
+      setSendingEmail(null);
+    }
+  }
+
+  function getStarColor(rating) {
+    if (rating >= 4.5) return 'text-emerald-500';
+    if (rating >= 3.5) return 'text-blue-500';
+    if (rating >= 2.5) return 'text-amber-500';
+    if (rating >= 1.5) return 'text-orange-500';
+    return 'text-red-500';
+  }
+
+  function renderStars(rating, size = 'w-5 h-5') {
+    const stars = [];
+    for (let i = 1; i <= 5; i++) {
+      stars.push(
+        <Star
+          key={i}
+          className={`${size} ${i <= Math.round(rating) ? 'text-amber-400 fill-amber-400' : 'text-gray-300'}`}
+        />
+      );
+    }
+    return stars;
+  }
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-800">Doctor Ratings Report</h2>
+        <p className="text-gray-500">Search for a doctor to view their ratings</p>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <form onSubmit={handleSearch} className="flex flex-wrap gap-4 items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm font-medium text-gray-600 mb-1">Doctor Name / ID</label>
+            <input
+              type="text"
+              placeholder="e.g., Dr Dawit or D0001..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-1">From</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-1">To</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+            />
+          </div>
+          <button
+            type="submit"
+            className="px-6 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg"
+          >
+            <Search className="w-5 h-5 inline mr-2" />
+            Search
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            className="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-all"
+          >
+            Clear
+          </button>
+        </form>
+      </div>
+
+      {!hasSearched && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+          <Search className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+          <p className="text-gray-500 text-lg">Search for a doctor</p>
+          <p className="text-gray-400 text-sm mt-2">Enter a doctor name or date range and click Search</p>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+        </div>
+      )}
+
+      {!loading && hasSearched && doctorRatings.length === 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+          <Star className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+          <p className="text-gray-500 text-lg">No ratings found</p>
+          <p className="text-gray-400 text-sm mt-2">Try a different doctor name or date range</p>
+        </div>
+      )}
+
+      {!loading && doctorRatings.length > 0 && (
+        <div className="space-y-8">
+          {doctorRatings.map((doctor) => {
+            const rating = Number(doctor.average_rating || 0);
+            const totalPatients = doctor.total_patients || 0;
+            const questionRatings = doctor.question_ratings || [];
+            
+            const getRatingStatus = () => {
+              if (rating >= 4.5) return { text: 'Excellent', label: 'Outstanding performance', color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' };
+              if (rating >= 4.0) return { text: 'Very Good', label: 'Strong performance', color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' };
+              if (rating >= 3.5) return { text: 'Good', label: 'Good performance', color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' };
+              if (rating >= 3.0) return { text: 'Average', label: 'Moderate performance', color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200' };
+              if (rating >= 2.0) return { text: 'Below Average', label: 'Needs improvement', color: 'text-orange-600', bg: 'bg-orange-50 border-orange-200' };
+              return { text: 'Poor', label: 'Requires urgent attention', color: 'text-red-600', bg: 'bg-red-50 border-red-200' };
+            };
+            
+            const status = getRatingStatus();
+            
+            return (
+              <div key={doctor.doctor_id} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                {/* Header */}
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-8 py-6 text-white">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold">Patient Feedback Report</h2>
+                      <p className="text-blue-100 mt-1">Confidential - For Doctor's Review</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-blue-100">Report Period</p>
+                      <p className="font-semibold">{dateFrom ? formatDisplayDate(dateFrom) : 'All Time'} - {dateTo ? formatDisplayDate(dateTo) : 'Present'}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Doctor Info */}
+                <div className="px-8 py-6 border-b border-gray-200">
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl">
+                      {doctor.doctor_name.charAt(0)}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-2xl font-bold text-gray-800">{doctor.doctor_name}</h3>
+                      <p className="text-gray-500">Doctor ID: {doctor.doctor_id} | Department: {doctor.department || 'General'}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Summary Box */}
+                <div className="px-8 py-6 bg-gray-50">
+                  <p className="text-gray-600 leading-relaxed">
+                    Dear <span className="font-semibold text-gray-800">{doctor.doctor_name}</span>,
+                  </p>
+                  <p className="text-gray-600 leading-relaxed mt-3">
+                    We are pleased to present your patient feedback report for the period of <span className="font-semibold">{dateFrom ? formatDisplayDate(dateFrom) : 'all available time'}</span> to <span className="font-semibold">{dateTo ? formatDisplayDate(dateTo) : 'present'}</span>. 
+                    This report summarizes the feedback collected from <span className="font-semibold">{totalPatients} patient{totalPatients !== 1 ? 's' : ''}</span> who completed our patient satisfaction survey during their visit.
+                  </p>
+                </div>
+                
+                {/* Main Rating */}
+                <div className="px-8 py-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <p className="text-gray-500 text-sm uppercase tracking-wide">Overall Rating</p>
+                      <div className="flex items-baseline gap-2 mt-1">
+                        <span className="text-5xl font-bold text-gray-800">{rating.toFixed(1)}</span>
+                        <span className="text-xl text-gray-400">/ 5.0</span>
+                      </div>
+                      <div className="flex items-center gap-1 mt-2">
+                        <StarRating value={rating} size="md" />
+                      </div>
+                      <p className="text-sm text-gray-500 mt-1">Based on {totalPatients} patient{totalPatients !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div className={`px-6 py-4 rounded-xl border-2 ${status.bg}`}>
+                      <p className={`text-xl font-bold ${status.color}`}>{status.text}</p>
+                      <p className="text-sm text-gray-600 mt-1">{status.label}</p>
+                    </div>
+                  </div>
+                  
+                  {/* Rating Scale Legend */}
+                  <div className="mb-6 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                    <p className="text-sm font-semibold text-gray-700 mb-2">Rating Scale:</p>
+                    <div className="grid grid-cols-5 gap-2 text-xs text-gray-600">
+                      <div className="text-center"><span className="font-bold">5</span> = Excellent</div>
+                      <div className="text-center"><span className="font-bold">4</span> = Very Good</div>
+                      <div className="text-center"><span className="font-bold">3</span> = Average</div>
+                      <div className="text-center"><span className="font-bold">2</span> = Not Good</div>
+                      <div className="text-center"><span className="font-bold">1</span> = Very Bad</div>
+                    </div>
+                  </div>
+                  
+                  {/* Question Ratings */}
+                  {questionRatings.length > 0 && (
+                    <div className="mt-6">
+                      <h4 className="text-lg font-bold text-gray-800 mb-4">Detailed Ratings by Category</h4>
+                      <div className="space-y-4">
+                        {questionRatings.map((qr, idx) => (
+                          <div key={idx} className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <p className="font-semibold text-gray-800 text-lg">{qr.question}</p>
+                                <p className="text-sm text-gray-500 mt-1">{qr.count} patient{qr.count !== 1 ? 's' : ''} rated this aspect</p>
+                              </div>
+                              <div className="text-right">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-3xl font-bold text-gray-800">{qr.average.toFixed(1)}</span>
+                                  <div className="flex flex-col items-center">
+                                    <StarRating value={qr.average} size="sm" />
+                                    <span className="text-xs text-gray-500 mt-1">out of 5</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-3 w-full bg-gray-200 rounded-full h-3">
+                              <div 
+                                className={`h-3 rounded-full ${
+                                  qr.average >= 4.5 ? 'bg-emerald-500' :
+                                  qr.average >= 4.0 ? 'bg-emerald-400' :
+                                  qr.average >= 3.5 ? 'bg-blue-500' :
+                                  qr.average >= 3.0 ? 'bg-blue-400' :
+                                  qr.average >= 2.0 ? 'bg-amber-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${(qr.average / 5) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Feedback */}
+                <div className="px-8 py-6 bg-blue-50 border-t border-blue-100">
+                  <h4 className="font-bold text-gray-800 mb-2">Performance Summary</h4>
+                  <p className="text-gray-600">
+                    {rating >= 4.0 
+                      ? 'Outstanding performance! Patients consistently rate you at the highest levels across all aspects of care. Your dedication to patient satisfaction is evident. Continue providing this exceptional level of care.'
+                      : rating >= 3.5 
+                      ? 'Good performance. Patients appreciate your care and service. While you are performing well, there are specific areas where focused improvement could elevate patient satisfaction even further.'
+                      : rating >= 3.0
+                      ? 'Average performance indicates that there is room for improvement. Consider reviewing the detailed feedback below to identify specific areas where you can enhance patient experience.'
+                      : 'Below average ratings suggest that improvements are needed. We recommend reviewing the feedback carefully and working with your supervisors to develop an improvement plan.'}
+                  </p>
+                </div>
+                
+                {/* Footer */}
+                <div className="px-8 py-4 bg-gray-100 border-t border-gray-200 flex items-center justify-between">
+                  <p className="text-sm text-gray-500">
+                    This is an automated report from the Patient Feedback System.
+                  </p>
+                  <button
+                    onClick={() => openEmailModal(doctor)}
+                    disabled={sendingEmail === doctor.doctor_id}
+                    className="px-6 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-indigo-700 transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {sendingEmail === doctor.doctor_id ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4" />
+                        Send Report via Email
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {emailModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setEmailModal({ isOpen: false, doctor: null })}>
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-modal shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-gray-800">Send Rating Report</h3>
+                <p className="text-gray-500 text-sm">Dr. {emailModal.doctor?.doctor_name}</p>
+              </div>
+              <button onClick={() => setEmailModal({ isOpen: false, doctor: null })} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSendEmail} className="p-6 space-y-4">
+              <div className="text-center p-4 bg-gray-50 rounded-xl">
+                <div className={`text-3xl font-bold ${getStarColor(emailModal.doctor?.average_rating)}`}>
+                  {emailModal.doctor?.average_rating?.toFixed(1)} / 5
+                </div>
+                <p className="text-gray-500 text-sm mt-1">
+                  Based on {emailModal.doctor?.total_ratings} reviews
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Doctor's Email</label>
+                <input
+                  type="email"
+                  value={emailForm.email}
+                  onChange={(e) => setEmailForm({ ...emailForm, email: e.target.value })}
+                  className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+                  placeholder="doctor@hospital.com"
+                  required
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEmailModal({ isOpen: false, doctor: null })}
+                  className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingEmail}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold rounded-xl transition-all shadow-lg disabled:opacity-50"
+                >
+                  {sendingEmail ? 'Sending...' : 'Send Email'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

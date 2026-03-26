@@ -4,6 +4,8 @@ const express = require('express');
 const path = require('path');
 const db = require('./db');
 const { sendSms } = require('./services/sms');
+const { sendEmail } = require('./services/email');
+const { generateDoctorReportPDF } = require('./services/pdf');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -15,6 +17,42 @@ const QUESTION_TYPES = new Set(['text', 'stars', 'single_choice', 'multi_choice'
 app.use(express.json());
 app.use(express.static(FRONTEND_DIST));
 app.use(express.static(path.join(__dirname, '../public')));
+
+async function ensureAdminUsersTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE
+    )
+  `);
+}
+
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(password, hash) {
+  return hashPassword(password) === hash;
+}
+
+function generateSessionToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+const sessions = new Map();
+
+function requireAuth(req, res, next) {
+  const token = req.header('x-session-token');
+  if (!token || !sessions.has(token)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  req.adminUser = sessions.get(token);
+  next();
+}
 
 function requireAdmin(req, res, next) {
   const allowInsecure = String(process.env.ALLOW_INSECURE_ADMIN || 'true').toLowerCase() === 'true';
@@ -581,7 +619,7 @@ app.post('/api/visits/sync', async function (req, res) {
   }
 });
 
-app.get('/api/questions', requireAdmin, async function (req, res) {
+app.get('/api/questions', requireAuth, async function (req, res) {
   try {
     await ensureQuestionsTableAndDefaults();
     const includeInactive = String(req.query.all || '').toLowerCase() === 'true';
@@ -592,7 +630,7 @@ app.get('/api/questions', requireAdmin, async function (req, res) {
   }
 });
 
-app.post('/api/questions', requireAdmin, async function (req, res) {
+app.post('/api/questions', requireAuth, async function (req, res) {
   try {
     await ensureQuestionsTableAndDefaults();
     const normalized = normalizeQuestionInput(req.body);
@@ -609,6 +647,7 @@ app.post('/api/questions', requireAdmin, async function (req, res) {
       [q.key, q.label, q.type, q.required, JSON.stringify(q.options), q.min_value, q.max_value, orderNo, q.is_active, pageNum, q.category]
     );
 
+    await logActivity(req.adminUser.id, 'create_question', { question_id: inserted.rows[0].id, label: q.label });
     return res.json({ question: inserted.rows[0] });
   } catch (e) {
     if (String(e.message || '').toLowerCase().includes('unique')) {
@@ -618,7 +657,7 @@ app.post('/api/questions', requireAdmin, async function (req, res) {
   }
 });
 
-app.patch('/api/questions/:id', requireAdmin, async function (req, res) {
+app.patch('/api/questions/:id', requireAuth, async function (req, res) {
   try {
     await ensureQuestionsTableAndDefaults();
     const id = Number(req.params.id);
@@ -654,6 +693,7 @@ app.patch('/api/questions/:id', requireAdmin, async function (req, res) {
       [merged.key, merged.label, merged.type, merged.required, JSON.stringify(merged.options || []), merged.min_value, merged.max_value, merged.order_no, merged.is_active, merged.page_number, merged.category, id]
     );
 
+    await logActivity(req.adminUser.id, 'update_question', { question_id: id, label: merged.label });
     return res.json({ question: updated.rows[0] });
   } catch (e) {
     if (String(e.message || '').toLowerCase().includes('unique')) {
@@ -663,7 +703,7 @@ app.patch('/api/questions/:id', requireAdmin, async function (req, res) {
   }
 });
 
-app.delete('/api/questions/:id', requireAdmin, async function (req, res) {
+app.delete('/api/questions/:id', requireAuth, async function (req, res) {
   try {
     await ensureQuestionsTableAndDefaults();
     const id = Number(req.params.id);
@@ -675,13 +715,14 @@ app.delete('/api/questions/:id', requireAdmin, async function (req, res) {
     );
 
     if (!out.rowCount) return res.status(404).json({ error: 'question_not_found' });
+    await logActivity(req.adminUser.id, 'delete_question', { question_id: id });
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ error: 'question_delete_failed', details: e.message });
   }
 });
 
-app.post('/api/questions/reorder', requireAdmin, async function (req, res) {
+app.post('/api/questions/reorder', requireAuth, async function (req, res) {
   try {
     await ensureQuestionsTableAndDefaults();
     const ids = Array.isArray(req.body.ids) ? req.body.ids.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0) : [];
@@ -784,7 +825,7 @@ app.post('/api/feedback', async function (req, res) {
   }
 });
 
-app.get('/api/responses', requireAdmin, async function (req, res) {
+app.get('/api/responses', requireAuth, async function (req, res) {
   const grouped = String(req.query.grouped || '').toLowerCase() === 'true';
   const search = String(req.query.search || '').trim();
   const doctorId = String(req.query.doctor_id || '').trim();
@@ -871,7 +912,7 @@ app.get('/api/responses', requireAdmin, async function (req, res) {
   });
 });
 
-app.delete('/api/responses', requireAdmin, async function (req, res) {
+app.delete('/api/responses', requireAuth, async function (req, res) {
   const ids = req.body.ids;
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: 'ids_required' });
@@ -898,7 +939,7 @@ app.delete('/api/responses', requireAdmin, async function (req, res) {
   }
 });
 
-app.get('/api/doctors/list', requireAdmin, async function (_req, res) {
+app.get('/api/doctors/list', requireAuth, async function (_req, res) {
   try {
     const rows = await db.query(`
       SELECT DISTINCT fr.doctor_id, fr.doctor_name 
@@ -912,7 +953,412 @@ app.get('/api/doctors/list', requireAdmin, async function (_req, res) {
   }
 });
 
-app.get('/api/analytics', requireAdmin, async function (_req, res) {
+app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
+  try {
+    const doctorNameFilter = textOrEmpty(req.query.doctor_name || '');
+    const dateFrom = textOrEmpty(req.query.date_from || '');
+    const dateTo = textOrEmpty(req.query.date_to || '');
+
+    let whereConditions = [];
+    let params = [];
+    let paramIdx = 1;
+
+    if (dateFrom) {
+      whereConditions.push(`submitted_at >= $${paramIdx++}`);
+      params.push(dateFrom);
+    }
+
+    if (dateTo) {
+      whereConditions.push(`submitted_at <= $${paramIdx++}`);
+      params.push(dateTo + ' 23:59:59');
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    const submissions = await db.query(`
+      SELECT id, patient_name, doctor_names, question_answers, submitted_at
+      FROM feedback_submissions
+      ${whereClause}
+      ORDER BY submitted_at DESC
+    `, params);
+
+    const doctorStats = {};
+
+    const QUESTION_TYPES = ['Quality of Care', 'Time & Attention', 'Professionalism & Communication'];
+
+    for (const sub of submissions.rows) {
+      const qa = sub.question_answers || {};
+      const doctorNamesStr = sub.doctor_names || '';
+      const doctorNamesList = doctorNamesStr.split(',').map(d => d.trim());
+      
+      const localIdToNameMap = {};
+      const doctorRatingsInSubmission = {};
+      let doctorIndex = 0;
+      
+      for (const key of Object.keys(qa)) {
+        if (key.startsWith('doctor_')) {
+          const match = key.match(/^doctor_(D\d+)_(.+)$/);
+          if (match) {
+            const doctorId = match[1];
+            const questionType = match[2].replace(/_/g, ' ');
+            const ratingValue = parseFloat(qa[key]);
+            
+            if (!isNaN(ratingValue) && ratingValue >= 1 && ratingValue <= 5 && QUESTION_TYPES.includes(questionType)) {
+              if (!localIdToNameMap[doctorId] && doctorIndex < doctorNamesList.length) {
+                localIdToNameMap[doctorId] = doctorNamesList[doctorIndex];
+                doctorIndex++;
+              }
+              
+              if (!doctorRatingsInSubmission[doctorId]) {
+                doctorRatingsInSubmission[doctorId] = { total: 0, count: 0, questions: {} };
+              }
+              
+              if (!doctorRatingsInSubmission[doctorId].questions[questionType]) {
+                doctorRatingsInSubmission[doctorId].questions[questionType] = ratingValue;
+                doctorRatingsInSubmission[doctorId].total += ratingValue;
+                doctorRatingsInSubmission[doctorId].count++;
+              }
+            }
+          }
+        }
+      }
+      
+      for (const doctorId of Object.keys(doctorRatingsInSubmission)) {
+        const docData = doctorRatingsInSubmission[doctorId];
+        
+        if (!doctorStats[doctorId]) {
+          let doctorName = localIdToNameMap[doctorId] || doctorId;
+          if (!doctorName.match(/^dr\.?\s/i)) {
+            doctorName = 'Dr. ' + doctorName;
+          }
+          
+          doctorStats[doctorId] = {
+            doctor_id: doctorId,
+            doctor_name: doctorName,
+            department: 'General',
+            patient_count: 0,
+            total_patient_avg: 0,
+            five_star: 0,
+            four_star: 0,
+            three_star: 0,
+            two_star: 0,
+            one_star: 0,
+            question_ratings: {}
+          };
+          
+          for (const qt of QUESTION_TYPES) {
+            doctorStats[doctorId].question_ratings[qt] = {
+              question: qt,
+              total: 0,
+              count: 0
+            };
+          }
+        }
+        
+        const patientAvg = docData.count > 0 ? docData.total / docData.count : 0;
+        doctorStats[doctorId].patient_count++;
+        doctorStats[doctorId].total_patient_avg += patientAvg;
+        
+        const roundedAvg = Math.round(patientAvg);
+        if (roundedAvg === 5) doctorStats[doctorId].five_star++;
+        else if (roundedAvg === 4) doctorStats[doctorId].four_star++;
+        else if (roundedAvg === 3) doctorStats[doctorId].three_star++;
+        else if (roundedAvg === 2) doctorStats[doctorId].two_star++;
+        else if (roundedAvg === 1) doctorStats[doctorId].one_star++;
+        
+        for (const qt of Object.keys(docData.questions)) {
+          doctorStats[doctorId].question_ratings[qt].total += docData.questions[qt];
+          doctorStats[doctorId].question_ratings[qt].count++;
+        }
+      }
+    }
+
+    let ratings = Object.values(doctorStats).map(d => {
+      const questionRatingsArray = Object.values(d.question_ratings)
+        .filter(qr => qr.count > 0)
+        .map(qr => ({
+          question: qr.question,
+          average: qr.count > 0 ? qr.total / qr.count : 0,
+          count: qr.count
+        }));
+
+      return {
+        doctor_id: d.doctor_id,
+        doctor_name: d.doctor_name,
+        department: d.department,
+        total_patients: d.patient_count,
+        average_rating: d.patient_count > 0 ? d.total_patient_avg / d.patient_count : 0,
+        five_star: d.five_star,
+        four_star: d.four_star,
+        three_star: d.three_star,
+        two_star: d.two_star,
+        one_star: d.one_star,
+        question_ratings: questionRatingsArray
+      };
+    });
+
+    if (doctorNameFilter) {
+      ratings = ratings.filter(r => 
+        r.doctor_name.toLowerCase().includes(doctorNameFilter.toLowerCase()) ||
+        r.doctor_id.toLowerCase().includes(doctorNameFilter.toLowerCase())
+      );
+    }
+
+    ratings.sort((a, b) => a.doctor_name.localeCompare(b.doctor_name));
+
+    return res.json({ ratings });
+  } catch (e) {
+    return res.status(500).json({ error: 'fetch_failed', details: e.message });
+  }
+});
+
+app.post('/api/doctor-ratings/send-email', requireAuth, async function (req, res) {
+  try {
+    const { doctor_id, doctor_name, email, average_rating, total_patients, total_ratings, date_from, date_to, question_ratings } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'email_required' });
+    }
+
+    const rating = Number(average_rating) || 0;
+    const total = Number(total_patients || total_ratings || 0);
+    
+    const getRatingStatus = () => {
+      if (rating >= 4.5) return { text: 'Excellent', label: 'Outstanding performance', color: '#059669' };
+      if (rating >= 4.0) return { text: 'Very Good', label: 'Strong performance', color: '#059669' };
+      if (rating >= 3.5) return { text: 'Good', label: 'Good performance', color: '#2563eb' };
+      if (rating >= 3.0) return { text: 'Average', label: 'Moderate performance', color: '#d97706' };
+      if (rating >= 2.0) return { text: 'Below Average', label: 'Needs improvement', color: '#ea580c' };
+      return { text: 'Poor', label: 'Requires urgent attention', color: '#dc2626' };
+    };
+    
+    const getFeedbackMessage = () => {
+      if (rating >= 4.0) {
+        return 'Outstanding performance! Patients consistently rate you at the highest levels across all aspects of care. Your dedication to patient satisfaction is evident. Continue providing this exceptional level of care.';
+      } else if (rating >= 3.5) {
+        return 'Good performance. Patients appreciate your care and service. While you are performing well, there are specific areas where focused improvement could elevate patient satisfaction even further.';
+      } else if (rating >= 3.0) {
+        return 'Average performance indicates that there is room for improvement. Consider reviewing the detailed feedback to identify specific areas where you can enhance patient experience.';
+      } else {
+        return 'Below average ratings suggest that improvements are needed. We recommend reviewing the feedback carefully and working with your supervisors to develop an improvement plan.';
+      }
+    };
+    
+    const status = getRatingStatus();
+    
+    const formatDate = (dateStr) => {
+      if (!dateStr) return 'All Time';
+      const [y, m, d] = dateStr.split('-');
+      return `${d}/${m}/${y}`;
+    };
+
+    const questionRatingsHtml = Array.isArray(question_ratings) && question_ratings.length > 0
+      ? question_ratings.map(qr => {
+          const pct = (Number(qr.average) / 5) * 100;
+          const barColor = qr.average >= 4.5 ? '#059669' : qr.average >= 3.5 ? '#2563eb' : qr.average >= 2.5 ? '#d97706' : '#dc2626';
+          return `
+            <div style="background: #f9fafb; border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid #e5e7eb;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div>
+                  <p style="font-weight: 600; color: #1f2937; margin: 0;">${qr.question}</p>
+                  <p style="font-size: 12px; color: #6b7280; margin: 4px 0 0 0;">${qr.count} patient${qr.count !== 1 ? 's' : ''} rated this aspect</p>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-size: 24px; font-weight: 700; color: #1f2937;">${Number(qr.average).toFixed(1)}</span>
+                  <span style="color: #9ca3af; font-size: 14px;"> / 5</span>
+                </div>
+              </div>
+              <div style="background: #e5e7eb; border-radius: 6px; height: 8px; width: 100%;">
+                <div style="background: ${barColor}; height: 8px; border-radius: 6px; width: ${pct}%;"></div>
+              </div>
+            </div>
+          `;
+        }).join('')
+      : '';
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f3f4f6;">
+  
+  <div style="max-width: 700px; margin: 20px auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+    
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); padding: 40px; color: white;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h1 style="margin: 0; font-size: 28px; font-weight: 700;">Patient Feedback Report</h1>
+          <p style="margin: 8px 0 0 0; color: #bfdbfe; font-size: 14px;">Confidential - For Doctor's Review</p>
+        </div>
+        <div style="text-align: right;">
+          <p style="margin: 0; font-size: 12px; color: #bfdbfe;">Report Period</p>
+          <p style="margin: 4px 0 0 0; font-weight: 600;">${formatDate(date_from)} - ${formatDate(date_to)}</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Doctor Info -->
+    <div style="padding: 32px; border-bottom: 1px solid #e5e7eb;">
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center; color: white; font-size: 28px; font-weight: 700;">
+          ${(doctor_name || 'D').charAt(0)}
+        </div>
+        <div>
+          <h2 style="margin: 0; font-size: 24px; font-weight: 700; color: #1f2937;">${doctor_name}</h2>
+          <p style="margin: 4px 0 0 0; color: #6b7280; font-size: 14px;">Doctor ID: ${doctor_id || 'N/A'} | Department: General</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Summary -->
+    <div style="padding: 32px; background: #f9fafb;">
+      <p style="color: #4b5563; line-height: 1.8; margin: 0;">
+        Dear <strong style="color: #1f2937;">${doctor_name}</strong>,
+      </p>
+      <p style="color: #4b5563; line-height: 1.8; margin: 16px 0 0 0;">
+        We are pleased to share your patient feedback report for the period of <strong style="color: #1f2937;">${formatDate(date_from)}</strong> to <strong style="color: #1f2937;">${formatDate(date_to)}</strong>. 
+        This report summarizes the feedback collected from <strong style="color: #1f2937;">${total} patient${total !== 1 ? 's' : ''}</strong> who completed our patient satisfaction survey during their visit.
+      </p>
+    </div>
+    
+    <!-- Main Rating -->
+    <div style="padding: 32px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px;">
+        <div>
+          <p style="margin: 0; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Overall Rating</p>
+          <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 8px;">
+            <span style="font-size: 56px; font-weight: 700; color: #1f2937;">${rating.toFixed(1)}</span>
+            <span style="font-size: 20px; color: #9ca3af;">/ 5.0</span>
+          </div>
+          <p style="margin: 8px 0 0 0; font-size: 14px; color: #6b7280;">Based on ${total} patient${total !== 1 ? 's' : ''}</p>
+        </div>
+        <div style="background: ${status.color}15; border: 2px solid ${status.color}; border-radius: 16px; padding: 20px; text-align: center;">
+          <p style="margin: 0; font-size: 20px; font-weight: 700; color: ${status.color};">${status.text}</p>
+          <p style="margin: 8px 0 0 0; font-size: 12px; color: #6b7280; max-width: 200px;">${status.label}</p>
+        </div>
+      </div>
+      
+      <!-- Rating Scale -->
+      <div style="background: #eff6ff; border-radius: 12px; padding: 16px; margin-bottom: 24px; border: 1px solid #bfdbfe;">
+        <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #1f2937;">Rating Scale:</p>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #4b5563;">
+          <div><strong>5</strong> = Excellent</div>
+          <div><strong>4</strong> = Very Good</div>
+          <div><strong>3</strong> = Average</div>
+          <div><strong>2</strong> = Not Good</div>
+          <div><strong>1</strong> = Very Bad</div>
+        </div>
+      </div>
+      
+      <div style="border-top: 1px solid #e5e7eb; padding-top: 24px;">
+        <h3 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: #1f2937;">Detailed Ratings by Category</h3>
+        <p style="margin: 0; color: #4b5563; line-height: 1.6;">
+          A total of <strong style="color: #1f2937;">${total} patient${total !== 1 ? 's' : ''}</strong> provided feedback during this period. 
+          Your ratings across different aspects of care are detailed below.
+        </p>
+      </div>
+      
+      ${questionRatingsHtml}
+    </div>
+    
+    <!-- Feedback -->
+    <div style="padding: 24px 32px; background: #eff6ff; border-top: 1px solid #bfdbfe;">
+      <h4 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 700; color: #1f2937;">Performance Summary</h4>
+      <p style="margin: 0; color: #4b5563; line-height: 1.7;">
+        ${getFeedbackMessage()}
+      </p>
+    </div>
+    
+    <!-- Footer -->
+    <div style="padding: 20px 32px; background: #f3f4f6; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+      <p style="margin: 0; font-size: 12px; color: #9ca3af;">
+        This is an automated report from the Patient Feedback System.
+      </p>
+      <p style="margin: 0; font-size: 12px; color: #9ca3af;">
+        Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+      </p>
+    </div>
+    
+  </div>
+  
+</body>
+</html>
+    `;
+
+    // Generate PDF
+    let pdfBuffer = null;
+    try {
+      pdfBuffer = await generateDoctorReportPDF({
+        doctor_name,
+        doctor_id,
+        average_rating,
+        total_patients: total,
+        date_from,
+        date_to,
+        question_ratings
+      });
+    } catch (pdfError) {
+      console.error('PDF generation failed:', pdfError.message);
+    }
+
+    const result = await sendEmail({
+      to: email,
+      subject: `Patient Feedback Report - ${doctor_name} | Rating: ${rating.toFixed(1)}/5`,
+      html,
+      pdfBuffer,
+      pdfFilename: `Patient_Feedback_Report_${doctor_name.replace(/\s+/g, '_')}.pdf`
+    });
+
+    if (!result.ok) {
+      return res.status(500).json({ error: 'email_failed', details: result.error });
+    }
+
+    return res.json({ ok: true, message: 'Email sent successfully with PDF attachment' });
+  } catch (e) {
+    return res.status(500).json({ error: 'send_failed', details: e.message });
+  }
+});
+
+app.get('/api/doctors/info', requireAuth, async function (req, res) {
+  try {
+    const doctorId = textOrEmpty(req.query.doctor_id || '');
+    
+    if (!doctorId) {
+      return res.status(400).json({ error: 'doctor_id_required' });
+    }
+    
+    const SOURCE_API_URL = process.env.SOURCE_API_URL || 'http://localhost:3002';
+    
+    try {
+      const response = await fetch(`${SOURCE_API_URL}/source/doctors/${doctorId}`);
+      if (response.ok) {
+        const data = await response.json();
+        const doctor = data.doctor || data;
+        return res.json({ 
+          doctor_id: doctor.id,
+          doctor_name: doctor.doctor_name,
+          email: doctor.email || null,
+          specialty: doctor.specialty || null
+        });
+      }
+    } catch (e) {
+      console.error('Source API error:', e.message);
+    }
+    
+    return res.json({ 
+      doctor_id: doctorId,
+      email: null 
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'fetch_failed', details: e.message });
+  }
+});
+
+app.get('/api/analytics', requireAuth, async function (_req, res) {
   const totals = await db.query('SELECT COUNT(*)::int AS total_submissions FROM feedback_submissions');
 
   const submissions = await db.query(
@@ -999,8 +1445,219 @@ app.get('/admin', function (_req, res) {
   res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
 });
 
+app.get('/api/auth/check', async function (req, res) {
+  try {
+    await ensureAdminUsersTable();
+    const result = await db.query('SELECT COUNT(*) as count FROM admin_users');
+    const hasUsers = parseInt(result.rows[0].count) > 0;
+    return res.json({ has_users: hasUsers });
+  } catch (e) {
+    return res.status(500).json({ error: 'check_failed' });
+  }
+});
+
+app.post('/api/auth/register', async function (req, res) {
+  try {
+    await ensureAdminUsersTable();
+    
+    const existingUsers = await db.query('SELECT COUNT(*) as count FROM admin_users');
+    const isFirstAdmin = parseInt(existingUsers.rows[0].count) === 0;
+    
+    if (!isFirstAdmin) {
+      const token = req.header('x-session-token');
+      if (!token || !sessions.has(token)) {
+        return res.status(401).json({ error: 'authentication_required' });
+      }
+    }
+    
+    const { username, email, password } = req.body;
+    
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'username_email_password_required' });
+    }
+    
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'password_min_6_chars' });
+    }
+    
+    const passwordHash = hashPassword(password);
+    
+    const result = await db.query(
+      'INSERT INTO admin_users(username, email, password_hash) VALUES($1, $2, $3) RETURNING id, username, email',
+      [username.trim(), email.trim().toLowerCase(), passwordHash]
+    );
+    
+    return res.json({ user: result.rows[0] });
+  } catch (e) {
+    if (String(e.message).includes('unique')) {
+      return res.status(400).json({ error: 'username_or_email_exists' });
+    }
+    return res.status(500).json({ error: 'register_failed', details: e.message });
+  }
+});
+
+app.post('/api/auth/login', async function (req, res) {
+  try {
+    await ensureAdminUsersTable();
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username_password_required' });
+    }
+    
+    const result = await db.query(
+      'SELECT id, username, email, password_hash FROM admin_users WHERE (username = $1 OR email = $1) AND is_active = TRUE',
+      [username.trim()]
+    );
+    
+    if (!result.rowCount) {
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
+    
+    const user = result.rows[0];
+    
+    if (!verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
+    
+    const sessionToken = generateSessionToken();
+    sessions.set(sessionToken, { id: user.id, username: user.username, email: user.email });
+    
+    return res.json({ 
+      token: sessionToken,
+      user: { id: user.id, username: user.username, email: user.email }
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'login_failed', details: e.message });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, function (req, res) {
+  const token = req.header('x-session-token');
+  sessions.delete(token);
+  return res.json({ ok: true });
+});
+
+app.get('/api/auth/me', requireAuth, function (req, res) {
+  return res.json({ user: req.adminUser });
+});
+
+app.get('/api/admin/users', requireAuth, async function (req, res) {
+  try {
+    const result = await db.query(
+      'SELECT id, username, email, created_at, is_active FROM admin_users ORDER BY created_at DESC'
+    );
+    return res.json({ users: result.rows });
+  } catch (e) {
+    return res.status(500).json({ error: 'fetch_failed', details: e.message });
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAuth, async function (req, res) {
+  try {
+    const id = Number(req.params.id);
+    if (id === req.adminUser.id) {
+      return res.status(400).json({ error: 'cannot_delete_self' });
+    }
+    await db.query('DELETE FROM admin_users WHERE id = $1', [id]);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'delete_failed', details: e.message });
+  }
+});
+
+app.patch('/api/admin/users/:id', requireAuth, async function (req, res) {
+  try {
+    const id = Number(req.params.id);
+    const { username, email, password, is_active } = req.body;
+    
+    if (password && password.length < 6) {
+      return res.status(400).json({ error: 'password_min_6_chars' });
+    }
+    
+    const updates = [];
+    const params = [];
+    let idx = 1;
+    
+    if (username) {
+      updates.push(`username = $${idx++}`);
+      params.push(username.trim());
+    }
+    if (email) {
+      updates.push(`email = $${idx++}`);
+      params.push(email.trim().toLowerCase());
+    }
+    if (password) {
+      updates.push(`password_hash = $${idx++}`);
+      params.push(hashPassword(password));
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${idx++}`);
+      params.push(Boolean(is_active));
+    }
+    
+    if (updates.length > 0) {
+      params.push(id);
+      await db.query(`UPDATE admin_users SET ${updates.join(', ')} WHERE id = $${idx}`, params);
+      
+      await db.query(
+        'INSERT INTO activity_logs(user_id, action, details) VALUES($1, $2, $3)',
+        [req.adminUser.id, 'update_user', JSON.stringify({ user_id: id, username, changes: Object.keys({ username, email, password, is_active }).filter(k => ({ username, email, password, is_active }[k] !== undefined)) })]
+      );
+    }
+    
+    return res.json({ ok: true });
+  } catch (e) {
+    if (String(e.message).includes('unique')) {
+      return res.status(400).json({ error: 'username_or_email_exists' });
+    }
+    return res.status(500).json({ error: 'update_failed', details: e.message });
+  }
+});
+
+app.get('/api/admin/activity-logs', requireAuth, async function (req, res) {
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const result = await db.query(`
+      SELECT al.*, au.username 
+      FROM activity_logs al 
+      LEFT JOIN admin_users au ON au.id = al.user_id 
+      ORDER BY al.created_at DESC 
+      LIMIT $1
+    `, [limit]);
+    return res.json({ logs: result.rows });
+  } catch (e) {
+    return res.status(500).json({ error: 'fetch_failed', details: e.message });
+  }
+});
+
+async function ensureActivityLogsTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS activity_logs (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES admin_users(id),
+      action TEXT NOT NULL,
+      details JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function logActivity(userId, action, details) {
+  try {
+    await db.query(
+      'INSERT INTO activity_logs(user_id, action, details) VALUES($1, $2, $3)',
+      [userId, action, JSON.stringify(details)]
+    );
+  } catch (e) {
+    console.error('Failed to log activity:', e.message);
+  }
+}
+
 async function boot() {
   await ensureQuestionsTableAndDefaults();
+  await ensureAdminUsersTable();
+  await ensureActivityLogsTable();
   app.listen(PORT, function () {
     console.log('Server running at ' + BASE_URL);
   });
