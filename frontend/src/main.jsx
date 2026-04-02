@@ -927,6 +927,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [loadingResponses, setLoadingResponses] = React.useState(false);
   const [pagination, setPagination] = React.useState({ page: 1, limit: 5, total: 0, total_pages: 0 });
+  const [pageLimit, setPageLimit] = React.useState(5);
 
   const [newQuestion, setNewQuestion] = React.useState({
     key: '',
@@ -1150,7 +1151,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
 
       const [aRes, rRes, qRes, dRes] = await Promise.all([
         fetch('/api/analytics', { headers: headers() }),
-        fetch(`/api/responses?grouped=true&page=1&limit=${pagination.limit}`, { headers: headers() }),
+        fetch(`/api/responses?grouped=true&page=1&limit=${pageLimit}`, { headers: headers() }),
         fetch('/api/questions?all=true', { headers: headers() }),
         fetch('/api/doctors/list', { headers: headers() })
       ]);
@@ -1175,12 +1176,14 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
         }
         setDoctorsList(uniqueDoctors);
       }
-      setPagination({
-        page: rData.page || 1,
-        limit: rData.limit || pagination.limit,
-        total: rData.total || 0,
-        total_pages: rData.total_pages || 0
-      });
+        const newLimit = rData.limit || pageLimit;
+        setPagination({
+          page: rData.page || 1,
+          limit: newLimit,
+          total: rData.total || 0,
+          total_pages: rData.total_pages || 0
+        });
+        if (rData.limit) setPageLimit(rData.limit);
 
       setSelectedIds(new Set());
       if (showNotif) showMessage('Loaded successfully', 'success');
@@ -1189,15 +1192,16 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
     }
   }
 
-  async function fetchResponsesWithFilters(pageOverride, currentFilters) {
+  async function fetchResponsesWithFilters(pageOverride, currentFilters, limitOverride) {
     setLoadingResponses(true);
+    const currentLimit = limitOverride || pageLimit;
     try {
       const params = new URLSearchParams({ grouped: 'true' });
       if (currentFilters.search) params.set('search', currentFilters.search);
       if (currentFilters.date_from) params.set('date_from', currentFilters.date_from);
       if (currentFilters.date_to) params.set('date_to', currentFilters.date_to);
       params.set('page', pageOverride);
-      params.set('limit', pagination.limit);
+      params.set('limit', currentLimit);
 
       const res = await fetch('/api/responses?' + params.toString(), { headers: headers() });
       const data = await res.json();
@@ -2280,7 +2284,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
               <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                 <p className="text-sm text-gray-500">Showing {Math.min((pagination.page - 1) * pagination.limit + 1, pagination.total)} - {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}</p>
                 <div className="flex items-center gap-2">
-                  <select value={pagination.limit} onChange={(e) => { setPagination((p) => ({ ...p, limit: Number(e.target.value), page: 1 })); fetchResponsesWithFilters(1, filters); }} className="px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white">
+                  <select value={pagination.limit} onChange={(e) => { const newLimit = Number(e.target.value); setPageLimit(newLimit); setPagination((p) => ({ ...p, limit: newLimit, page: 1 })); fetchResponsesWithFilters(1, filters, newLimit); }} className="px-3 py-2 border-2 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white">
                     <option value={5}>5 / page</option>
                     <option value={10}>10 / page</option>
                     <option value={20}>20 / page</option>

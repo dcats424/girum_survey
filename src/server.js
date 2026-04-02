@@ -31,6 +31,30 @@ async function ensureAdminUsersTable() {
   `);
 }
 
+async function ensureSessionsTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+      username TEXT NOT NULL,
+      email TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days'
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON admin_sessions(expires_at)`);
+}
+
+async function loadSessions() {
+  await db.query(`DELETE FROM admin_sessions WHERE expires_at < NOW()`);
+  const result = await db.query('SELECT token, user_id, username, email FROM admin_sessions');
+  const loaded = new Map();
+  for (const row of result.rows) {
+    loaded.set(row.token, { id: row.user_id, username: row.username, email: row.email });
+  }
+  return loaded;
+}
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex');
 }
@@ -43,11 +67,14 @@ function generateSessionToken() {
   return crypto.randomBytes(32).toString('base64url');
 }
 
-const sessions = new Map();
+let sessions = new Map();
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const token = req.header('x-session-token');
-  if (!token || !sessions.has(token)) {
+  if (!token) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!sessions.has(token)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   req.adminUser = sessions.get(token);
@@ -797,14 +824,15 @@ app.post('/api/feedback', async function (req, res) {
     if (survey.error) return res.status(400).json({ error: survey.error });
 
     const doctorNames = survey.doctors ? survey.doctors.map(d => d.doctor_name).join(', ') : '';
+    const doctorIds = survey.doctors ? survey.doctors.map(d => d.id) : [];
 
     const client = await db.pool.connect();
     try {
       await client.query('BEGIN');
 
       const sub = await client.query(
-        'INSERT INTO feedback_submissions(token, visit_id, patient_id, patient_name, doctor_names, question_answers) VALUES($1, $2, $3, $4, $5, $6::jsonb) RETURNING id',
-        [token, survey.visit_id, survey.patient_id || null, survey.patient_name, doctorNames, JSON.stringify(questionAnswers)]
+        'INSERT INTO feedback_submissions(token, visit_id, patient_id, patient_name, doctor_names, doctor_ids, question_answers) VALUES($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING id',
+        [token, survey.visit_id, survey.patient_id || null, survey.patient_name, doctorNames, doctorIds, JSON.stringify(questionAnswers)]
       );
 
       const submissionId = sub.rows[0].id;
@@ -976,7 +1004,7 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
     const submissions = await db.query(`
-      SELECT id, patient_name, doctor_names, question_answers, submitted_at
+      SELECT id, patient_name, doctor_names, doctor_ids, question_answers, submitted_at
       FROM feedback_submissions
       ${whereClause}
       ORDER BY submitted_at DESC
@@ -990,12 +1018,39 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
       const qa = sub.question_answers || {};
       const doctorNamesStr = sub.doctor_names || '';
       const doctorNamesList = doctorNamesStr.split(',').map(d => d.trim());
+      const doctorIdsFromDb = sub.doctor_ids || [];
+      
+      const allKeys = Object.keys(qa);
+      const doctorIdsInOrder = [];
+      const seenIds = new Set();
+      
+      for (const key of allKeys) {
+        if (key.startsWith('doctor_')) {
+          const match = key.match(/^doctor_(D\d+)_.+$/);
+          if (match) {
+            const doctorId = match[1];
+            if (!seenIds.has(doctorId)) {
+              seenIds.add(doctorId);
+              doctorIdsInOrder.push(doctorId);
+            }
+          }
+        }
+      }
       
       const localIdToNameMap = {};
-      const doctorRatingsInSubmission = {};
-      let doctorIndex = 0;
+      if (doctorIdsFromDb.length > 0 && doctorIdsFromDb.length === doctorNamesList.length) {
+        for (let i = 0; i < doctorIdsFromDb.length; i++) {
+          localIdToNameMap[doctorIdsFromDb[i]] = doctorNamesList[i];
+        }
+      } else {
+        for (let i = 0; i < doctorIdsInOrder.length; i++) {
+          localIdToNameMap[doctorIdsInOrder[i]] = doctorNamesList[i] || doctorIdsInOrder[i];
+        }
+      }
       
-      for (const key of Object.keys(qa)) {
+      const doctorRatingsInSubmission = {};
+      
+      for (const key of allKeys) {
         if (key.startsWith('doctor_')) {
           const match = key.match(/^doctor_(D\d+)_(.+)$/);
           if (match) {
@@ -1004,11 +1059,6 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
             const ratingValue = parseFloat(qa[key]);
             
             if (!isNaN(ratingValue) && ratingValue >= 1 && ratingValue <= 5 && QUESTION_TYPES.includes(questionType)) {
-              if (!localIdToNameMap[doctorId] && doctorIndex < doctorNamesList.length) {
-                localIdToNameMap[doctorId] = doctorNamesList[doctorIndex];
-                doctorIndex++;
-              }
-              
               if (!doctorRatingsInSubmission[doctorId]) {
                 doctorRatingsInSubmission[doctorId] = { total: 0, count: 0, questions: {} };
               }
@@ -1362,30 +1412,43 @@ app.get('/api/analytics', requireAuth, async function (_req, res) {
   const totals = await db.query('SELECT COUNT(*)::int AS total_submissions FROM feedback_submissions');
 
   const submissions = await db.query(
-    'SELECT fs.question_answers, fs.doctor_names FROM feedback_submissions fs'
+    'SELECT fs.question_answers, fs.doctor_names, fs.doctor_ids FROM feedback_submissions fs'
   );
 
   const doctorStats = {};
   
   for (const row of submissions.rows) {
     const qa = row.question_answers || {};
-    const doctorNamesList = row.doctor_names ? row.doctor_names.split(', ') : [];
+    const doctorNamesList = row.doctor_names ? row.doctor_names.split(', ').map(n => n.trim()) : [];
+    const doctorIdsFromDb = row.doctor_ids || [];
     
-    const idToNameMap = {};
-    let doctorIndex = 0;
+    const allKeys = Object.keys(qa);
+    const doctorIdsInOrder = [];
+    const seenIds = new Set();
     
-    for (const key of Object.keys(qa)) {
-      const match = key.match(/^doctor_(D\d+)_/);
+    for (const key of allKeys) {
+      const match = key.match(/^doctor_(D\d+)_.+$/);
       if (match) {
         const doctorId = match[1];
-        if (!idToNameMap[doctorId]) {
-          idToNameMap[doctorId] = doctorNamesList[doctorIndex] || doctorId;
-          doctorIndex++;
+        if (!seenIds.has(doctorId)) {
+          seenIds.add(doctorId);
+          doctorIdsInOrder.push(doctorId);
         }
       }
     }
     
-    for (const key of Object.keys(qa)) {
+    const idToNameMap = {};
+    if (doctorIdsFromDb.length > 0 && doctorIdsFromDb.length === doctorNamesList.length) {
+      for (let i = 0; i < doctorIdsFromDb.length; i++) {
+        idToNameMap[doctorIdsFromDb[i]] = doctorNamesList[i];
+      }
+    } else {
+      for (let i = 0; i < doctorIdsInOrder.length; i++) {
+        idToNameMap[doctorIdsInOrder[i]] = doctorNamesList[i] || doctorIdsInOrder[i];
+      }
+    }
+    
+    for (const key of allKeys) {
       const match = key.match(/^doctor_(D\d+)_(.+)$/);
       if (match) {
         const doctorId = match[1];
@@ -1522,6 +1585,10 @@ app.post('/api/auth/login', async function (req, res) {
     
     const sessionToken = generateSessionToken();
     sessions.set(sessionToken, { id: user.id, username: user.username, email: user.email });
+    await db.query(
+      'INSERT INTO admin_sessions(token, user_id, username, email) VALUES($1, $2, $3, $4) ON CONFLICT (token) DO UPDATE SET expires_at = NOW() + INTERVAL \'7 days\'',
+      [sessionToken, user.id, user.username, user.email]
+    );
     
     return res.json({ 
       token: sessionToken,
@@ -1532,9 +1599,10 @@ app.post('/api/auth/login', async function (req, res) {
   }
 });
 
-app.post('/api/auth/logout', requireAuth, function (req, res) {
+app.post('/api/auth/logout', requireAuth, async function (req, res) {
   const token = req.header('x-session-token');
   sessions.delete(token);
+  await db.query('DELETE FROM admin_sessions WHERE token = $1', [token]);
   return res.json({ ok: true });
 });
 
@@ -1658,6 +1726,8 @@ async function boot() {
   await ensureQuestionsTableAndDefaults();
   await ensureAdminUsersTable();
   await ensureActivityLogsTable();
+  await ensureSessionsTable();
+  sessions = await loadSessions();
   app.listen(PORT, function () {
     console.log('Server running at ' + BASE_URL);
   });

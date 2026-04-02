@@ -39,9 +39,11 @@ function createSourceSystem(deps) {
       CREATE TABLE IF NOT EXISTS source_encounter_doctors (
         encounter_id TEXT NOT NULL REFERENCES source_encounters(id) ON DELETE CASCADE,
         doctor_id TEXT NOT NULL REFERENCES source_doctors(id),
+        doctor_order INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (encounter_id, doctor_id)
       )
     `);
+    await db.query(`ALTER TABLE source_encounter_doctors ADD COLUMN IF NOT EXISTS doctor_order INTEGER NOT NULL DEFAULT 0`);
   }
 
   async function getSourceEncounterDetails(encounterId) {
@@ -61,7 +63,7 @@ function createSourceSystem(deps) {
        FROM source_encounter_doctors ed
        JOIN source_doctors d ON d.id = ed.doctor_id
        WHERE ed.encounter_id = $1
-       ORDER BY d.name ASC`,
+       ORDER BY ed.doctor_order ASC`,
       [encounterId]
     );
 
@@ -225,8 +227,8 @@ function createSourceSystem(deps) {
              VALUES($1, $2, $3, $4, NOW(), NOW())`,
             [encounterId, patientId, status, visitId]
           );
-          for (const doctorId of doctorIds) {
-            await client.query('INSERT INTO source_encounter_doctors(encounter_id, doctor_id) VALUES($1, $2)', [encounterId, doctorId]);
+          for (let i = 0; i < doctorIds.length; i++) {
+            await client.query('INSERT INTO source_encounter_doctors(encounter_id, doctor_id, doctor_order) VALUES($1, $2, $3)', [encounterId, doctorIds[i], i]);
           }
           await client.query('COMMIT');
         } catch (e) {
