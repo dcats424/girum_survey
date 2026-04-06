@@ -252,8 +252,25 @@ function SurveyPage() {
   const [questionAnswers, setQuestionAnswers] = React.useState({});
   const [submitting, setSubmitting] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
+  const [selectedLang, setSelectedLang] = React.useState(null);
 
   const totalPages = doctors.length + (generalQuestions.length > 0 ? 1 : 0);
+
+  function getQuestionLabel(q) {
+    const labelObj = q.label;
+    if (typeof labelObj === 'object' && labelObj !== null) {
+      return labelObj[selectedLang] || labelObj.en || labelObj;
+    }
+    return labelObj;
+  }
+
+  function getQuestionOptions(q) {
+    const opts = q.options;
+    if (typeof opts === 'object' && opts !== null && !Array.isArray(opts)) {
+      return opts[selectedLang] || opts.en || [];
+    }
+    return Array.isArray(opts) ? opts : [];
+  }
 
   function getQuestionLabelWithDoctorName(label, doctorName) {
     return label.replace(/\{doctor_name\}/gi, doctorName);
@@ -456,6 +473,9 @@ function SurveyPage() {
     }
 
     if (q.type === 'yes_no') {
+      const yesNoOptions = getQuestionOptions(q);
+      const yesLabel = yesNoOptions[0] || 'Yes';
+      const noLabel = yesNoOptions[1] || 'No';
       return (
         <div className="flex gap-4 justify-center">
           <button
@@ -469,7 +489,7 @@ function SurveyPage() {
             }`}
           >
             <ThumbsUp className="w-10 h-10" />
-            <span className="text-lg">Yes</span>
+            <span className="text-lg">{yesLabel}</span>
           </button>
           <button
             key="no"
@@ -482,16 +502,17 @@ function SurveyPage() {
             }`}
           >
             <ThumbsDown className="w-10 h-10" />
-            <span className="text-lg">No</span>
+            <span className="text-lg">{noLabel}</span>
           </button>
         </div>
       );
     }
 
     if (q.type === 'single_choice') {
+      const options = getQuestionOptions(q);
       return (
         <div className="grid grid-cols-2 gap-3">
-          {(q.options || []).map((opt, idx) => (
+          {options.map((opt, idx) => (
             <button
               key={opt}
               type="button"
@@ -516,9 +537,10 @@ function SurveyPage() {
 
     if (q.type === 'multi_choice') {
       const selected = Array.isArray(value) ? value : [];
+      const options = getQuestionOptions(q);
       return (
         <div className="grid grid-cols-2 gap-3">
-          {(q.options || []).map((opt) => (
+          {options.map((opt) => (
             <button
               key={opt}
               type="button"
@@ -559,23 +581,6 @@ function SurveyPage() {
           </div>
           <h2 className="text-xl font-bold text-gray-800 mb-2">Loading Survey</h2>
           <p className="text-gray-500">Please wait...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!token) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
-          <div className="w-24 h-24 bg-gradient-to-br from-red-100 to-red-200 rounded-full flex items-center justify-center mx-auto mb-6">
-            <AlertCircle className="w-12 h-12 text-red-500" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-3">Survey Not Found</h2>
-          <p className="text-gray-500 mb-6">Please use the survey link sent to your phone or email.</p>
-          <div className="bg-gray-50 rounded-xl p-4">
-            <p className="text-sm text-gray-500">If you believe this is an error, please contact support.</p>
-          </div>
         </div>
       </div>
     );
@@ -646,6 +651,53 @@ function SurveyPage() {
                 <span className="text-sm text-gray-500">Your response is confidential</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedLang && token) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-xl">
+            <Heart className="w-10 h-10 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-3">Select Your Language</h2>
+          <p className="text-gray-500 mb-8">Please select your preferred language</p>
+          <div className="space-y-4">
+            <button
+              onClick={() => setSelectedLang('en')}
+              className="w-full py-5 px-6 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold text-lg hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-3"
+            >
+              <span className="text-2xl">🇬🇧</span>
+              English
+            </button>
+            <button
+              onClick={() => setSelectedLang('am')}
+              className="w-full py-5 px-6 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-bold text-lg hover:from-emerald-600 hover:to-teal-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-3"
+            >
+              <span className="text-2xl">🇪🇹</span>
+              አማርኛ (Amharic)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
+          <div className="w-24 h-24 bg-gradient-to-br from-red-100 to-red-200 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertCircle className="w-12 h-12 text-red-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-3">Survey Not Found</h2>
+          <p className="text-gray-500 mb-6">Please use the survey link sent to your phone or email.</p>
+          <div className="bg-gray-50 rounded-xl p-4">
+            <p className="text-sm text-gray-500">If you believe this is an error, please contact support.</p>
           </div>
         </div>
       </div>
@@ -780,7 +832,7 @@ function SurveyPage() {
                               <div key={`${currentDoctor.id}_${q.id}`} className="bg-white rounded-xl p-5 border border-gray-100">
                                 <label className="block font-semibold text-gray-800 text-base mb-4 flex items-start gap-2">
                                   <span className="text-blue-500 mt-0.5">Q.</span>
-                                  {getQuestionLabelWithDoctorName(q.label, currentDoctor.doctor_name)}
+                                  {getQuestionLabelWithDoctorName(getQuestionLabel(q), currentDoctor.doctor_name)}
                                   {q.required && <span className="text-red-400">*</span>}
                                 </label>
                                 {renderQuestionInput(q, answerKey)}
@@ -852,7 +904,7 @@ function SurveyPage() {
                         <div key={q.id} className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-6 border-2 border-gray-100">
                           <label className="block font-bold text-gray-800 text-lg mb-4 flex items-start gap-2">
                             <span className="text-emerald-500 mt-1">Q.</span>
-                            {q.label}
+                            {getQuestionLabel(q)}
                             {q.required && <span className="text-red-400 mt-1">*</span>}
                           </label>
                           {renderQuestionInput(q, q.id)}
@@ -931,9 +983,12 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
 
   const [newQuestion, setNewQuestion] = React.useState({
     key: '',
-    label: '',
+    label_en: '',
+    label_am: '',
     type: 'stars',
     required: true,
+    options_en: [],
+    options_am: [],
     options: [],
     min: 1,
     max: 5,
@@ -943,6 +998,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
   const [questionFilter, setQuestionFilter] = React.useState('all');
   const [editingQuestion, setEditingQuestion] = React.useState(null);
   const [optionInput, setOptionInput] = React.useState('');
+  const [optionInputAm, setOptionInputAm] = React.useState('');
   const [deleteModal, setDeleteModal] = React.useState({ isOpen: false, question: null });
   const [responseDeleteModal, setResponseDeleteModal] = React.useState({ isOpen: false, ids: [], count: 0 });
   const [downloadDropdown, setDownloadDropdown] = React.useState(false);
@@ -1247,7 +1303,9 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
     setNewQuestion((prev) => ({
       ...prev,
       type,
-      options: type === 'single_choice' || type === 'multi_choice' ? prev.options : [],
+      options: type === 'single_choice' || type === 'multi_choice' || type === 'yes_no' ? prev.options : [],
+      options_en: type === 'single_choice' || type === 'multi_choice' || type === 'yes_no' ? prev.options_en : [],
+      options_am: type === 'single_choice' || type === 'multi_choice' || type === 'yes_no' ? prev.options_am : [],
       min: type === 'stars' ? 1 : prev.min,
       max: type === 'stars' ? 5 : prev.max
     }));
@@ -1257,30 +1315,56 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
     const opt = optionInput.trim();
     if (!opt) return;
     setNewQuestion((prev) => {
-      if (prev.options.includes(opt)) return prev;
-      return { ...prev, options: [...prev.options, opt] };
+      const currentOptions = prev.options_en || prev.options || [];
+      if (currentOptions.includes(opt)) return prev;
+      return { ...prev, options_en: [...currentOptions, opt], options: [...currentOptions, opt] };
     });
     setOptionInput('');
   }
 
+  function addOptionAm() {
+    const opt = optionInputAm.trim();
+    if (!opt) return;
+    setNewQuestion((prev) => {
+      const currentOptions = prev.options_am || [];
+      if (currentOptions.includes(opt)) return prev;
+      return { ...prev, options_am: [...currentOptions, opt] };
+    });
+    setOptionInputAm('');
+  }
+
   function removeOption(value) {
-    setNewQuestion((prev) => ({ ...prev, options: prev.options.filter((x) => x !== value) }));
+    setNewQuestion((prev) => {
+      const options_en = (prev.options_en || prev.options || []).filter((x) => x !== value);
+      const options_am = (prev.options_am || []).filter((x) => x !== value);
+      return { ...prev, options: options_en, options_en, options_am };
+    });
+  }
+
+  function removeOptionAm(value) {
+    setNewQuestion((prev) => {
+      const options_am = (prev.options_am || []).filter((x) => x !== value);
+      return { ...prev, options_am };
+    });
   }
 
   async function createQuestion(e) {
     e.preventDefault();
     try {
-      if (!newQuestion.label.trim()) throw new Error('Question label is required');
-      if ((newQuestion.type === 'single_choice' || newQuestion.type === 'multi_choice') && newQuestion.options.length === 0) {
-        throw new Error('Add at least one option for choice question');
+      if (!newQuestion.label_en.trim()) throw new Error('Question label (English) is required');
+      const isChoice = newQuestion.type === 'single_choice' || newQuestion.type === 'multi_choice' || newQuestion.type === 'yes_no';
+      if (isChoice && (newQuestion.options_en || newQuestion.options || []).length === 0) {
+        throw new Error('Add at least one English option for choice question');
       }
 
       const payload = {
         key: newQuestion.key,
-        label: newQuestion.label,
+        label_en: newQuestion.label_en,
+        label_am: newQuestion.label_am,
         type: newQuestion.type,
         required: newQuestion.required,
-        options: newQuestion.options,
+        options_en: newQuestion.options_en || newQuestion.options || [],
+        options_am: newQuestion.options_am || [],
         min: newQuestion.min,
         max: newQuestion.max,
         page_number: newQuestion.page_number || 1,
@@ -1309,8 +1393,9 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
         showMessage('Question created successfully', 'success');
       }
 
-      setNewQuestion({ key: '', label: '', type: 'stars', required: true, options: [], min: 1, max: 5, page_number: 1, category: 'general' });
+      setNewQuestion({ key: '', label_en: '', label_am: '', type: 'stars', required: true, options_en: [], options_am: [], options: [], min: 1, max: 5, page_number: 1, category: 'general' });
       setOptionInput('');
+      setOptionInputAm('');
       await loadAll(false);
     } catch (err) {
       showMessage(err.message, 'error');
@@ -1319,25 +1404,32 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
 
   function editQuestion(q) {
     setEditingQuestion(q);
+    const labelObj = q.label || q;
+    const optionsObj = q.options || {};
     setNewQuestion({
       key: q.key || '',
-      label: q.label || '',
+      label_en: labelObj.en || labelObj,
+      label_am: labelObj.am || '',
       type: q.type || 'stars',
       required: q.required !== undefined ? q.required : true,
-      options: q.options || [],
-      min: q.min_value || 1,
-      max: q.max_value || 5,
+      options_en: optionsObj.en || (Array.isArray(q.options) ? q.options : []),
+      options_am: optionsObj.am || [],
+      options: optionsObj.en || (Array.isArray(q.options) ? q.options : []),
+      min: q.min_value || q.min || 1,
+      max: q.max_value || q.max || 5,
       page_number: q.page_number || 1,
       category: q.category || 'general'
     });
     setOptionInput('');
+    setOptionInputAm('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function cancelEdit() {
     setEditingQuestion(null);
-    setNewQuestion({ key: '', label: '', type: 'stars', required: true, options: [], min: 1, max: 5, page_number: 1, category: 'general' });
+    setNewQuestion({ key: '', label_en: '', label_am: '', type: 'stars', required: true, options_en: [], options_am: [], options: [], min: 1, max: 5, page_number: 1, category: 'general' });
     setOptionInput('');
+    setOptionInputAm('');
   }
 
   async function toggleQuestionActive(q) {
@@ -1419,16 +1511,57 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
       
       questions.filter(q => q.category === 'doctor').forEach((q) => {
         const answers = [];
+        const optionsObj = q.options || {};
+        const optionsEn = Array.isArray(optionsObj) ? optionsObj : (optionsObj.en || []);
+        const optionsAm = optionsObj.am || [];
+        const matchKey = q.key || String(q.id);
         for (const key of Object.keys(qa)) {
-          if (key.endsWith('_' + q.key)) {
-            answers.push(qa[key]);
+          if (key.endsWith('_' + matchKey)) {
+            const rawAnswer = qa[key];
+            let displayAnswer = rawAnswer;
+            if (q.type === 'text') {
+              displayAnswer = rawAnswer;
+            } else if (Array.isArray(rawAnswer)) {
+              const translated = rawAnswer.map(ans => {
+                const amIndex = optionsAm.indexOf(String(ans));
+                return amIndex !== -1 && optionsEn[amIndex] ? optionsEn[amIndex] : ans;
+              });
+              displayAnswer = translated.join(', ');
+            } else {
+              const amIndex = optionsAm.indexOf(String(rawAnswer));
+              if (amIndex !== -1 && optionsEn[amIndex]) {
+                displayAnswer = optionsEn[amIndex];
+              }
+            }
+            answers.push(displayAnswer);
           }
         }
-        row[q.key + ' (dr)'] = formatAnswerValue(answers.length > 0 ? answers.join(', ') : '-');
+        row[q.key || q.id] = formatAnswerValue(answers.length > 0 ? answers.join(', ') : '-');
       });
       
       questions.filter(q => q.category === 'general').forEach((q) => {
-        row[q.key + ' (general)'] = formatAnswerValue(qa[q.key]);
+        const rawAnswer = qa[q.key];
+        let displayAnswer = rawAnswer;
+        if (q.type === 'text') {
+          displayAnswer = rawAnswer;
+        } else {
+          const optionsObj = q.options || {};
+          const optionsEn = Array.isArray(optionsObj) ? optionsObj : (optionsObj.en || []);
+          const optionsAm = optionsObj.am || [];
+          if (Array.isArray(rawAnswer)) {
+            const translated = rawAnswer.map(ans => {
+              const amIndex = optionsAm.indexOf(String(ans));
+              return amIndex !== -1 && optionsEn[amIndex] ? optionsEn[amIndex] : ans;
+            });
+            displayAnswer = translated.join(', ');
+          } else if (typeof rawAnswer === 'string') {
+            const amIndex = optionsAm.indexOf(rawAnswer);
+            if (amIndex !== -1 && optionsEn[amIndex]) {
+              displayAnswer = optionsEn[amIndex];
+            }
+          }
+        }
+        row[q.key] = formatAnswerValue(displayAnswer);
       });
       return row;
     });
@@ -1573,7 +1706,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
     { id: 'yes_no', label: 'Yes/No', icon: '?' }
   ];
 
-  const isChoice = newQuestion.type === 'single_choice' || newQuestion.type === 'multi_choice';
+  const isChoice = newQuestion.type === 'single_choice' || newQuestion.type === 'multi_choice' || newQuestion.type === 'yes_no';
   const isRanged = newQuestion.type === 'stars' || newQuestion.type === 'number';
 
   const menuItems = [
@@ -1892,15 +2025,35 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                 </h3>
 
                 <form onSubmit={createQuestion} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Question Label</label>
-                    <input
-                      type="text"
-                      value={newQuestion.label}
-                      onChange={(e) => setNewQuestion((p) => ({ ...p, label: e.target.value }))}
-                      placeholder={newQuestion.category === 'doctor' ? "e.g., How would you rate {doctor_name}'s professionalism?" : "e.g., How was your experience?"}
-                      className="w-full p-3 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 transition-all"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <span className="flex items-center gap-2">
+                          Question Label (English) <span className="text-red-500">*</span>
+                        </span>
+                      </label>
+                      <input
+                        type="text"
+                        value={newQuestion.label_en || ''}
+                        onChange={(e) => setNewQuestion((p) => ({ ...p, label_en: e.target.value }))}
+                        placeholder={newQuestion.category === 'doctor' ? "e.g., How would you rate {doctor_name}'s professionalism?" : "e.g., How was your experience?"}
+                        className="w-full p-3 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <span className="flex items-center gap-2">
+                          Question Label (አማርኛ) <span className="text-xs text-gray-400">(Amharic)</span>
+                        </span>
+                      </label>
+                      <input
+                        type="text"
+                        value={newQuestion.label_am || ''}
+                        onChange={(e) => setNewQuestion((p) => ({ ...p, label_am: e.target.value }))}
+                        placeholder="e.g., የእይታዎን እንዴት ደረጃ ይሰጣሉ?"
+                        className="w-full p-3 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-200 transition-all"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -1993,7 +2146,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
 
                   {isChoice && (
                     <div className="space-y-3">
-                      <label className="block text-sm font-medium text-gray-700">Options</label>
+                      <label className="block text-sm font-medium text-gray-700">Options (English)</label>
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -2010,8 +2163,31 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {newQuestion.options.map((opt) => (
+                        {(Array.isArray(newQuestion.options_en) ? newQuestion.options_en : newQuestion.options || []).map((opt) => (
                           <button key={opt} type="button" onClick={() => removeOption(opt)} className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-sm font-medium flex items-center gap-1.5 hover:bg-blue-100 transition-colors">
+                            {opt} <X className="w-4 h-4" />
+                          </button>
+                        ))}
+                      </div>
+                      <label className="block text-sm font-medium text-gray-700 mt-4">Options (አማርኛ)</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={optionInputAm}
+                          onChange={(e) => setOptionInputAm(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); addOptionAm(); }
+                          }}
+                          placeholder="Add Amharic option..."
+                          className="flex-1 p-3 border-2 border-gray-100 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-200"
+                        />
+                        <button type="button" onClick={addOptionAm} className="px-4 py-3 bg-gray-100 rounded-xl hover:bg-gray-200 font-medium">
+                          <Plus className="w-5 h-5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(Array.isArray(newQuestion.options_am) ? newQuestion.options_am : []).map((opt) => (
+                          <button key={opt} type="button" onClick={() => removeOptionAm(opt)} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-100 transition-colors">
                             {opt} <X className="w-4 h-4" />
                           </button>
                         ))}
@@ -2092,7 +2268,14 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                   {questions
                     .filter(q => questionFilter === 'all' || q.category === questionFilter)
                     .sort((a, b) => (a.category === 'doctor' ? 0 : 1) - (b.category === 'doctor' ? 0 : 1))
-                    .map((q, idx) => (
+                    .map((q, idx) => {
+                      const labelObj = q.label || {};
+                      const optionsObj = q.options || {};
+                      const labelEn = typeof labelObj === 'object' ? labelObj.en || labelObj : labelObj;
+                      const labelAm = typeof labelObj === 'object' ? labelObj.am || '' : '';
+                      const optionsEn = Array.isArray(optionsObj) ? optionsObj : (optionsObj.en || []);
+                      const optionsAm = optionsObj.am || [];
+                      return (
                     <div key={q.id} className={`rounded-2xl p-4 border-2 transition-all ${q.is_active ? 'bg-gray-50 border-gray-200 hover:border-blue-200' : 'bg-gray-100 border-gray-300 opacity-70'}`}>
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -2104,7 +2287,8 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                             <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-medium">{q.type}</span>
                             {q.required && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-medium">Required</span>}
                           </div>
-                          <p className="font-semibold text-gray-800">{q.label}</p>
+                          <p className="font-semibold text-gray-800">{labelEn}</p>
+                          {labelAm && <p className="text-sm text-emerald-600 mt-1 font-medium">{labelAm}</p>}
                           <p className="text-sm text-gray-500 mt-1">Key: {q.key}</p>
                           <span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-bold mt-2 ${
                             q.category === 'doctor' 
@@ -2113,9 +2297,16 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                           }`}>
                             {q.category === 'doctor' ? '👨‍⚕️ Doctor' : '🏥 General'}
                           </span>
-                          {q.options?.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mt-2">
-                              {q.options.map((opt) => (<span key={opt} className="px-2.5 py-1 bg-gray-200 text-gray-700 rounded-lg text-xs font-medium">{opt}</span>))}
+                          {optionsEn.length > 0 && (
+                            <div className="mt-2">
+                              <div className="flex flex-wrap gap-1.5">
+                                {optionsEn.map((opt, i) => (<span key={opt} className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium">{opt}</span>))}
+                              </div>
+                              {optionsAm.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {optionsAm.map((opt, i) => (<span key={opt} className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium">{opt}</span>))}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -2129,7 +2320,8 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                    })}
                   {questions.filter(q => questionFilter === 'all' || q.category === questionFilter).length === 0 && (
                     <div className="text-center py-8 text-gray-500">
                       <FileText className="w-12 h-12 mx-auto mb-2 text-gray-300" />
@@ -2236,10 +2428,10 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Doctors</th>
                       {questions
                         .filter(q => q.category === 'doctor')
-                        .map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.key} (dr)</th>))}
+                        .map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.key}</th>))}
                       {questions
                         .filter(q => q.category === 'general')
-                        .map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.key} (general)</th>))}
+                        .map((q) => (<th key={q.id} className="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap min-w-[150px]">{q.key}</th>))}
                     </tr>
                   </thead>
                   <tbody>
@@ -2260,9 +2452,29 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                             .map((q) => {
                               const answers = [];
                               const qa = r.question_answers || {};
+                              const optionsObj = q.options || {};
+                              const optionsEn = Array.isArray(optionsObj) ? optionsObj : (optionsObj.en || []);
+                              const optionsAm = optionsObj.am || [];
+                              const matchKey = q.key || String(q.id);
                               for (const key of Object.keys(qa)) {
-                                if (key.endsWith('_' + q.key)) {
-                                  answers.push(qa[key]);
+                                if (key.endsWith('_' + matchKey)) {
+                                  const rawAnswer = qa[key];
+                                  let displayAnswer = rawAnswer;
+                                  if (q.type === 'text') {
+                                    displayAnswer = rawAnswer;
+                                  } else if (Array.isArray(rawAnswer)) {
+                                    const translated = rawAnswer.map(ans => {
+                                      const amIndex = optionsAm.indexOf(String(ans));
+                                      return amIndex !== -1 && optionsEn[amIndex] ? optionsEn[amIndex] : ans;
+                                    });
+                                    displayAnswer = translated.join(', ');
+                                  } else {
+                                    const amIndex = optionsAm.indexOf(String(rawAnswer));
+                                    if (amIndex !== -1 && optionsEn[amIndex]) {
+                                      displayAnswer = optionsEn[amIndex];
+                                    }
+                                  }
+                                  answers.push(displayAnswer);
                                 }
                               }
                               return (
@@ -2273,7 +2485,31 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                             })}
                           {questions
                             .filter(q => q.category === 'general')
-                            .map((q) => (<td key={q.id} className="px-4 py-3 text-sm text-gray-700 whitespace-normal max-w-[200px]"><span className="line-clamp-2">{formatAnswerValue((r.question_answers || {})[q.key])}</span></td>))}
+                            .map((q) => {
+                              const rawAnswer = (r.question_answers || {})[q.key];
+                              let displayAnswer = rawAnswer;
+                              if (q.type === 'text') {
+                                displayAnswer = rawAnswer;
+                              } else {
+                                const optionsObj = q.options || {};
+                                const optionsEn = Array.isArray(optionsObj) ? optionsObj : (optionsObj.en || []);
+                                const optionsAm = optionsObj.am || [];
+                                
+                                if (Array.isArray(rawAnswer)) {
+                                  const translated = rawAnswer.map(ans => {
+                                    const amIndex = optionsAm.indexOf(String(ans));
+                                    return amIndex !== -1 && optionsEn[amIndex] ? optionsEn[amIndex] : ans;
+                                  });
+                                  displayAnswer = translated.join(', ');
+                                } else if (typeof rawAnswer === 'string') {
+                                  const amIndex = optionsAm.indexOf(rawAnswer);
+                                  if (amIndex !== -1 && optionsEn[amIndex]) {
+                                    displayAnswer = optionsEn[amIndex];
+                                  }
+                                }
+                              }
+                              return (<td key={q.id} className="px-4 py-3 text-sm text-gray-700 whitespace-normal max-w-[200px]"><span className="line-clamp-2">{formatAnswerValue(displayAnswer)}</span></td>);
+                            })}
                         </tr>
                       ))
                     )}
@@ -2965,31 +3201,51 @@ function DoctorRatingsPage({ showMessage }) {
                           <div key={idx} className="bg-gray-50 rounded-xl p-5 border border-gray-100">
                             <div className="flex items-center justify-between">
                               <div className="flex-1">
-                                <p className="font-semibold text-gray-800 text-lg">{qr.question}</p>
+                                <p className="font-semibold text-gray-800 text-lg">{qr.question_key}</p>
+                                {qr.type === 'yes_no' ? (
+                                  <div className="flex gap-4 mt-2">
+                                    <span className="text-sm text-emerald-600 font-medium">Yes: {qr.yes_count}</span>
+                                    <span className="text-sm text-red-600 font-medium">No: {qr.no_count}</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <StarRating value={qr.average} size="sm" />
+                                    <span className="text-sm text-gray-500">({qr.average.toFixed(1)} / 5.0)</span>
+                                  </div>
+                                )}
                                 <p className="text-sm text-gray-500 mt-1">{qr.count} patient{qr.count !== 1 ? 's' : ''} rated this aspect</p>
                               </div>
-                              <div className="text-right">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-3xl font-bold text-gray-800">{qr.average.toFixed(1)}</span>
-                                  <div className="flex flex-col items-center">
-                                    <StarRating value={qr.average} size="sm" />
-                                    <span className="text-xs text-gray-500 mt-1">out of 5</span>
+                              {qr.type === 'yes_no' ? (
+                                <div className="text-right">
+                                  <span className="text-3xl font-bold text-gray-800">{qr.yes_count}</span>
+                                  <p className="text-xs text-gray-500">Yes answers</p>
+                                </div>
+                              ) : (
+                                <div className="text-right">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-3xl font-bold text-gray-800">{qr.average.toFixed(1)}</span>
+                                    <div className="flex flex-col items-center">
+                                      <StarRating value={qr.average} size="sm" />
+                                      <span className="text-xs text-gray-500 mt-1">out of 5</span>
+                                    </div>
                                   </div>
                                 </div>
+                              )}
+                            </div>
+                            {qr.type !== 'yes_no' && (
+                              <div className="mt-3 w-full bg-gray-200 rounded-full h-3">
+                                <div 
+                                  className={`h-3 rounded-full ${
+                                    qr.average >= 4.5 ? 'bg-emerald-500' :
+                                    qr.average >= 4.0 ? 'bg-emerald-400' :
+                                    qr.average >= 3.5 ? 'bg-blue-500' :
+                                    qr.average >= 3.0 ? 'bg-blue-400' :
+                                    qr.average >= 2.0 ? 'bg-amber-500' : 'bg-red-500'
+                                  }`}
+                                  style={{ width: `${(qr.average / 5) * 100}%` }}
+                                />
                               </div>
-                            </div>
-                            <div className="mt-3 w-full bg-gray-200 rounded-full h-3">
-                              <div 
-                                className={`h-3 rounded-full ${
-                                  qr.average >= 4.5 ? 'bg-emerald-500' :
-                                  qr.average >= 4.0 ? 'bg-emerald-400' :
-                                  qr.average >= 3.5 ? 'bg-blue-500' :
-                                  qr.average >= 3.0 ? 'bg-blue-400' :
-                                  qr.average >= 2.0 ? 'bg-amber-500' : 'bg-red-500'
-                                }`}
-                                style={{ width: `${(qr.average / 5) * 100}%` }}
-                              />
-                            </div>
+                            )}
                           </div>
                         ))}
                       </div>

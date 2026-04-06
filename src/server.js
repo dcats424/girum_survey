@@ -167,25 +167,31 @@ function normalizeQuestionType(type) {
 }
 
 function normalizeQuestionInput(body) {
-  const label = textOrEmpty(body.label);
+  const labelEn = textOrEmpty(body.label_en || body.label);
+  const labelAm = textOrEmpty(body.label_am || '');
   const type = normalizeQuestionType(body.type);
   const required = Boolean(body.required);
   const min = Number.isFinite(Number(body.min)) ? Number(body.min) : null;
   const max = Number.isFinite(Number(body.max)) ? Number(body.max) : null;
-  const options = Array.isArray(body.options)
-    ? body.options.map(textOrEmpty).filter(Boolean)
+  const optionsEn = Array.isArray(body.options_en || body.options)
+    ? (body.options_en || body.options).map(textOrEmpty).filter(Boolean)
     : typeof body.options_csv === 'string'
       ? body.options_csv.split(',').map(textOrEmpty).filter(Boolean)
       : [];
+  const optionsAm = Array.isArray(body.options_am)
+    ? body.options_am.map(textOrEmpty).filter(Boolean)
+    : [];
   const category = body.category === 'doctor' ? 'doctor' : 'general';
 
-  if (!label) return { error: 'question_label_required' };
+  if (!labelEn) return { error: 'question_label_required' };
   if (!QUESTION_TYPES.has(type)) return { error: 'invalid_question_type' };
-  if ((type === 'single_choice' || type === 'multi_choice') && options.length === 0) {
+  if ((type === 'single_choice' || type === 'multi_choice') && optionsEn.length === 0) {
     return { error: 'options_required_for_choice_type' };
   }
 
-  const key = textOrEmpty(body.key) || slugify(label) || ('question_' + Date.now());
+  const label = { en: labelEn, am: labelAm || labelEn };
+  const options = { en: optionsEn, am: optionsAm.length > 0 ? optionsAm : optionsEn };
+  const key = textOrEmpty(body.key) || slugify(labelEn) || ('question_' + Date.now());
 
   return {
     question: {
@@ -248,14 +254,20 @@ function validateQuestionAnswers(questionAnswers, questions, doctors) {
     }
 
     if (qType === 'single_choice') {
-      const opts = Array.isArray(q.options) ? q.options : [];
+      let opts = Array.isArray(q.options) ? q.options : [];
+      if (typeof opts === 'object' && opts !== null && !Array.isArray(opts)) {
+        opts = opts.en || [];
+      }
       if (typeof value !== 'string' || opts.indexOf(value) === -1) {
         return { ok: false, error: 'invalid_answer_' + q.key };
       }
     }
 
     if (qType === 'multi_choice') {
-      const opts = Array.isArray(q.options) ? q.options : [];
+      let opts = Array.isArray(q.options) ? q.options : [];
+      if (typeof opts === 'object' && opts !== null && !Array.isArray(opts)) {
+        opts = opts.en || [];
+      }
       if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || opts.indexOf(v) === -1)) {
         return { ok: false, error: 'invalid_answer_' + q.key };
       }
@@ -329,20 +341,40 @@ async function fetchQuestions(args) {
      ORDER BY page_number ASC, order_no ASC, id ASC`
   );
 
-  return rows.rows.map((r) => ({
-    id: Number(r.id),
-    key: r.question_key,
-    label: r.label,
-    type: normalizeQuestionType(r.type),
-    required: Boolean(r.required),
-    options: Array.isArray(r.options) ? r.options : [],
-    min_value: r.min_value === null ? null : Number(r.min_value),
-    max_value: r.max_value === null ? null : Number(r.max_value),
-    order_no: Number(r.order_no),
-    is_active: Boolean(r.is_active),
-    page_number: Number(r.page_number) || 1,
-    category: r.category || 'general'
-  }));
+  return rows.rows.map((r) => {
+    let parsedLabel = r.label;
+    if (typeof r.label === 'string') {
+      try { parsedLabel = JSON.parse(r.label); } catch (e) { parsedLabel = { en: r.label, am: r.label }; }
+    }
+    if (typeof parsedLabel !== 'object' || parsedLabel === null) {
+      parsedLabel = { en: String(r.label || ''), am: String(r.label || '') };
+    }
+    
+    let parsedOptions = r.options;
+    if (Array.isArray(r.options)) {
+      parsedOptions = { en: r.options, am: r.options };
+    } else if (typeof r.options === 'string') {
+      try { parsedOptions = JSON.parse(r.options); } catch (e) { parsedOptions = { en: [], am: [] }; }
+    }
+    if (typeof parsedOptions !== 'object' || parsedOptions === null || Array.isArray(parsedOptions)) {
+      parsedOptions = { en: Array.isArray(r.options) ? r.options : [], am: Array.isArray(r.options) ? r.options : [] };
+    }
+
+    return {
+      id: Number(r.id),
+      key: r.question_key,
+      label: parsedLabel,
+      type: normalizeQuestionType(r.type),
+      required: Boolean(r.required),
+      options: parsedOptions,
+      min_value: r.min_value === null ? null : Number(r.min_value),
+      max_value: r.max_value === null ? null : Number(r.max_value),
+      order_no: Number(r.order_no),
+      is_active: Boolean(r.is_active),
+      page_number: Number(r.page_number) || 1,
+      category: r.category || 'general'
+    };
+  });
 }
 
 async function upsertVisitGraph(payload) {
@@ -670,8 +702,8 @@ app.post('/api/questions', requireAuth, async function (req, res) {
 
     const pageNum = Number.isInteger(req.body.page_number) && req.body.page_number >= 1 ? req.body.page_number : 1;
     const inserted = await db.query(
-      'INSERT INTO survey_questions(question_key, label, type, required, options, min_value, max_value, order_no, is_active, is_deleted, page_number, category) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,FALSE,$10,$11) RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category',
-      [q.key, q.label, q.type, q.required, JSON.stringify(q.options), q.min_value, q.max_value, orderNo, q.is_active, pageNum, q.category]
+      'INSERT INTO survey_questions(question_key, label, type, required, options, min_value, max_value, order_no, is_active, is_deleted, page_number, category) VALUES($1,$2::jsonb,$3,$4,$5::jsonb,$6,$7,$8,$9,FALSE,$10,$11) RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category',
+      [q.key, JSON.stringify(q.label), q.type, q.required, JSON.stringify(q.options), q.min_value, q.max_value, orderNo, q.is_active, pageNum, q.category]
     );
 
     await logActivity(req.adminUser.id, 'create_question', { question_id: inserted.rows[0].id, label: q.label });
@@ -694,14 +726,36 @@ app.patch('/api/questions/:id', requireAuth, async function (req, res) {
     if (!current.rowCount) return res.status(404).json({ error: 'question_not_found' });
 
     const source = current.rows[0];
+    let sourceLabel = source.label;
+    if (typeof sourceLabel === 'string') {
+      try { sourceLabel = JSON.parse(sourceLabel); } catch (e) { sourceLabel = { en: sourceLabel, am: sourceLabel }; }
+    }
+    let sourceOptions = source.options;
+    if (Array.isArray(sourceOptions)) {
+      sourceOptions = { en: sourceOptions, am: sourceOptions };
+    } else if (typeof sourceOptions === 'string') {
+      try { sourceOptions = JSON.parse(sourceOptions); } catch (e) { sourceOptions = { en: [], am: [] }; }
+    }
+    if (typeof sourceOptions !== 'object' || sourceOptions === null) {
+      sourceOptions = { en: [], am: [] };
+    }
+
     const merged = {
       key: textOrEmpty(req.body.key) || source.question_key,
-      label: textOrEmpty(req.body.label) || source.label,
+      label: {
+        en: textOrEmpty(req.body.label_en || req.body.label) || (sourceLabel.en || sourceLabel),
+        am: textOrEmpty(req.body.label_am) || (sourceLabel.am || sourceLabel.en || sourceLabel)
+      },
       type: normalizeQuestionType(req.body.type || source.type),
       required: req.body.required === undefined ? source.required : Boolean(req.body.required),
-      options: Array.isArray(req.body.options)
-        ? req.body.options.map(textOrEmpty).filter(Boolean)
-        : source.options,
+      options: {
+        en: Array.isArray(req.body.options_en || req.body.options)
+          ? (req.body.options_en || req.body.options).map(textOrEmpty).filter(Boolean)
+          : (sourceOptions.en || []),
+        am: Array.isArray(req.body.options_am)
+          ? req.body.options_am.map(textOrEmpty).filter(Boolean)
+          : (sourceOptions.am || sourceOptions.en || [])
+      },
       min_value: req.body.min === undefined ? source.min_value : Number(req.body.min),
       max_value: req.body.max === undefined ? source.max_value : Number(req.body.max),
       order_no: req.body.order_no === undefined ? source.order_no : Number(req.body.order_no),
@@ -711,13 +765,13 @@ app.patch('/api/questions/:id', requireAuth, async function (req, res) {
     };
 
     if (!QUESTION_TYPES.has(merged.type)) return res.status(400).json({ error: 'invalid_question_type' });
-    if ((merged.type === 'single_choice' || merged.type === 'multi_choice') && (!Array.isArray(merged.options) || merged.options.length === 0)) {
+    if ((merged.type === 'single_choice' || merged.type === 'multi_choice') && (!merged.options.en || merged.options.en.length === 0)) {
       return res.status(400).json({ error: 'options_required_for_choice_type' });
     }
 
     const updated = await db.query(
-      'UPDATE survey_questions SET question_key=$1,label=$2,type=$3,required=$4,options=$5::jsonb,min_value=$6,max_value=$7,order_no=$8,is_active=$9,page_number=$10,category=$11,updated_at=NOW() WHERE id=$12 RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category',
-      [merged.key, merged.label, merged.type, merged.required, JSON.stringify(merged.options || []), merged.min_value, merged.max_value, merged.order_no, merged.is_active, merged.page_number, merged.category, id]
+      'UPDATE survey_questions SET question_key=$1,label=$2::jsonb,type=$3,required=$4,options=$5::jsonb,min_value=$6,max_value=$7,order_no=$8,is_active=$9,page_number=$10,category=$11,updated_at=NOW() WHERE id=$12 RETURNING id, question_key, label, type, required, options, min_value, max_value, order_no, is_active, page_number, category',
+      [merged.key, JSON.stringify(merged.label), merged.type, merged.required, JSON.stringify(merged.options || { en: [], am: [] }), merged.min_value, merged.max_value, merged.order_no, merged.is_active, merged.page_number, merged.category, id]
     );
 
     await logActivity(req.adminUser.id, 'update_question', { question_id: id, label: merged.label });
@@ -951,19 +1005,15 @@ app.delete('/api/responses', requireAuth, async function (req, res) {
     return res.status(400).json({ error: 'ids_required' });
   }
 
-  const placeholders = safeIds.map((_, i) => '$' + (i + 1)).join(', ');
-  const client = await db.pool.connect();
   try {
-    await client.query('BEGIN');
-    await client.query(`DELETE FROM feedback_ratings WHERE submission_id IN (${placeholders})`, safeIds);
-    await client.query(`DELETE FROM feedback_submissions WHERE id IN (${placeholders})`, safeIds);
-    await client.query('COMMIT');
-    return res.json({ ok: true, deleted: safeIds.length });
+    const delSubmissions = await db.query(
+      `DELETE FROM feedback_submissions WHERE id = ANY($1::bigint[])`,
+      [safeIds.map(id => parseInt(id))]
+    );
+    return res.json({ ok: true, deleted: delSubmissions.rowCount });
   } catch (e) {
-    await client.query('ROLLBACK');
+    console.error('Delete responses error:', e);
     return res.status(500).json({ error: 'delete_failed', details: e.message });
-  } finally {
-    client.release();
   }
 });
 
@@ -1003,6 +1053,10 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
 
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
+    const doctorQuestions = await db.query(
+      `SELECT id, question_key, label, type FROM survey_questions WHERE category = 'doctor' AND is_active = TRUE AND is_deleted = FALSE`
+    );
+
     const submissions = await db.query(`
       SELECT id, patient_name, doctor_names, doctor_ids, question_answers, submitted_at
       FROM feedback_submissions
@@ -1011,8 +1065,6 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
     `, params);
 
     const doctorStats = {};
-
-    const QUESTION_TYPES = ['Quality of Care', 'Time & Attention', 'Professionalism & Communication'];
 
     for (const sub of submissions.rows) {
       const qa = sub.question_answers || {};
@@ -1026,7 +1078,7 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
       
       for (const key of allKeys) {
         if (key.startsWith('doctor_')) {
-          const match = key.match(/^doctor_(D\d+)_.+$/);
+          const match = key.match(/^doctor_([^_]+)_(.+)$/);
           if (match) {
             const doctorId = match[1];
             if (!seenIds.has(doctorId)) {
@@ -1050,22 +1102,49 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
       
       const doctorRatingsInSubmission = {};
       
-      for (const key of allKeys) {
-        if (key.startsWith('doctor_')) {
-          const match = key.match(/^doctor_(D\d+)_(.+)$/);
-          if (match) {
-            const doctorId = match[1];
-            const questionType = match[2].replace(/_/g, ' ');
-            const ratingValue = parseFloat(qa[key]);
+      for (const dq of doctorQuestions.rows) {
+        const questionKey = dq.question_key || String(dq.id);
+        for (const doctorId of doctorIdsInOrder) {
+          const answerKey = `doctor_${doctorId}_${questionKey}`;
+          const answerValue = qa[answerKey];
+          
+          if (answerValue !== undefined && answerValue !== null) {
+            if (!doctorRatingsInSubmission[doctorId]) {
+              doctorRatingsInSubmission[doctorId] = { total: 0, count: 0, questions: {} };
+            }
             
-            if (!isNaN(ratingValue) && ratingValue >= 1 && ratingValue <= 5 && QUESTION_TYPES.includes(questionType)) {
-              if (!doctorRatingsInSubmission[doctorId]) {
-                doctorRatingsInSubmission[doctorId] = { total: 0, count: 0, questions: {} };
+            if (dq.type === 'yes_no') {
+              const normalizedAnswer = String(answerValue).toLowerCase();
+              if (normalizedAnswer === 'yes' || normalizedAnswer === 'no') {
+                if (!doctorRatingsInSubmission[doctorId].questions[questionKey]) {
+                  doctorRatingsInSubmission[doctorId].questions[questionKey] = {
+                    type: 'yes_no',
+                    yes_count: 0,
+                    no_count: 0,
+                    total: 0,
+                    count: 0
+                  };
+                }
+                if (normalizedAnswer === 'yes') {
+                  doctorRatingsInSubmission[doctorId].questions[questionKey].yes_count++;
+                } else {
+                  doctorRatingsInSubmission[doctorId].questions[questionKey].no_count++;
+                }
+                doctorRatingsInSubmission[doctorId].questions[questionKey].count++;
               }
-              
-              if (!doctorRatingsInSubmission[doctorId].questions[questionType]) {
-                doctorRatingsInSubmission[doctorId].questions[questionType] = ratingValue;
-                doctorRatingsInSubmission[doctorId].total += ratingValue;
+            } else {
+              const numericValue = Number(answerValue);
+              if (!isNaN(numericValue) && numericValue >= 1 && numericValue <= 5) {
+                if (!doctorRatingsInSubmission[doctorId].questions[questionKey]) {
+                  doctorRatingsInSubmission[doctorId].questions[questionKey] = {
+                    type: dq.type,
+                    total: 0,
+                    count: 0
+                  };
+                }
+                doctorRatingsInSubmission[doctorId].questions[questionKey].total += numericValue;
+                doctorRatingsInSubmission[doctorId].questions[questionKey].count++;
+                doctorRatingsInSubmission[doctorId].total += numericValue;
                 doctorRatingsInSubmission[doctorId].count++;
               }
             }
@@ -1095,14 +1174,6 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
             one_star: 0,
             question_ratings: {}
           };
-          
-          for (const qt of QUESTION_TYPES) {
-            doctorStats[doctorId].question_ratings[qt] = {
-              question: qt,
-              total: 0,
-              count: 0
-            };
-          }
         }
         
         const patientAvg = docData.count > 0 ? docData.total / docData.count : 0;
@@ -1116,9 +1187,25 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
         else if (roundedAvg === 2) doctorStats[doctorId].two_star++;
         else if (roundedAvg === 1) doctorStats[doctorId].one_star++;
         
-        for (const qt of Object.keys(docData.questions)) {
-          doctorStats[doctorId].question_ratings[qt].total += docData.questions[qt];
-          doctorStats[doctorId].question_ratings[qt].count++;
+        for (const [qKey, qData] of Object.entries(docData.questions)) {
+          if (!doctorStats[doctorId].question_ratings[qKey]) {
+            doctorStats[doctorId].question_ratings[qKey] = {
+              question_key: qKey,
+              type: qData.type || 'stars',
+              total: 0,
+              count: 0
+            };
+            if (qData.type === 'yes_no') {
+              doctorStats[doctorId].question_ratings[qKey].yes_count = 0;
+              doctorStats[doctorId].question_ratings[qKey].no_count = 0;
+            }
+          }
+          doctorStats[doctorId].question_ratings[qKey].total += qData.total || 0;
+          doctorStats[doctorId].question_ratings[qKey].count += qData.count;
+          if (qData.type === 'yes_no') {
+            doctorStats[doctorId].question_ratings[qKey].yes_count += qData.yes_count || 0;
+            doctorStats[doctorId].question_ratings[qKey].no_count += qData.no_count || 0;
+          }
         }
       }
     }
@@ -1127,9 +1214,12 @@ app.get('/api/doctor-ratings', requireAuth, async function (req, res) {
       const questionRatingsArray = Object.values(d.question_ratings)
         .filter(qr => qr.count > 0)
         .map(qr => ({
-          question: qr.question,
+          question_key: qr.question_key,
+          type: qr.type,
           average: qr.count > 0 ? qr.total / qr.count : 0,
-          count: qr.count
+          count: qr.count,
+          yes_count: qr.yes_count || 0,
+          no_count: qr.no_count || 0
         }));
 
       return {
