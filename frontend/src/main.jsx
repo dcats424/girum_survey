@@ -252,9 +252,56 @@ function SurveyPage() {
   const [questionAnswers, setQuestionAnswers] = React.useState({});
   const [submitting, setSubmitting] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
-  const [selectedLang, setSelectedLang] = React.useState(null);
+  const [selectedLang, setSelectedLang] = React.useState('am');
 
   const totalPages = doctors.length + (generalQuestions.length > 0 ? 1 : 0);
+
+  const translations = {
+    welcomeTitle: { en: 'Patient Feedback', am: 'የታካሚ አስተያየት' },
+    welcomeSubtitle: { en: 'Your opinion helps us improve care', am: 'አስተያየትዎ አገልግሎታችንን ለማሻሻል ይረዳናል' },
+    welcomeTextEn: 'First of all, we would like to thank you for choosing Girum Hospital. We kindly ask for your cooperation in filling out this questionnaire to help us improve our services.',
+    welcomeTextAm: 'በቅድሚያ ግሩም ሆሰፒታልን ስለመረጡ እያመሰገንን ፤ አገልግሎታችንን ለማሻሻል እንዲረዳን ይህን መጠየቅ ይሞሉ ዘንድ መልካም ፈቓዶን በትህትና እንጠይቓለን።',
+    doctors: { en: 'Doctors', am: 'ዶክተሮች' },
+    doctorsShort: { en: 'Doctors', am: 'ዶክተሮች' },
+    general: { en: 'General', am: 'አጠቃላይ' },
+    doctorSurvey: { en: 'Doctor Survey', am: 'የሐኪሞች መጠይቅ' },
+    generalSurvey: { en: 'General Survey', am: 'አጠቃላይ መጠይቅ' },
+    next: { en: 'Next', am: 'ቀጣይ' },
+    nextGeneral: { en: 'Next: General', am: 'ቀጣይ: አጠቃላይ' },
+    previous: { en: 'Previous', am: 'ቀዳሚ' },
+    submit: { en: 'Submit Feedback', am: 'አስተያየት ላክ' },
+    submitting: { en: 'Submitting...', am: 'በማስገባት ላይ...' },
+    confidential: { en: 'Your response is confidential and secure', am: 'አስተያየትዎ ሚስጥራዊ ነው እና ደህንነቱ የተጠበቀ ነው' },
+    thankYou: { en: 'Thank You!', am: 'እናመሰግናለን!' },
+    feedbackSubmitted: { en: 'Your feedback has been submitted successfully!', am: 'አስተያየትዎ በተሳካ ሁኔታ ተልኳል!' },
+    surveyCompleted: { en: 'This survey has already been completed.', am: 'ይህ መጠይቅ ቀደም ብሎ ተሞልቷል።' },
+    feedback: { en: 'Feedback', am: 'አስተያየት' },
+    received: { en: 'Received', am: 'ደርሶናል' },
+    yourVoice: { en: 'Your Voice', am: 'የእርስዎ ድምፅ' },
+    matters: { en: 'Matters', am: 'ለእኛ ዋጋ አለው' },
+    better: { en: 'Better', am: 'ለተሻለ' },
+    services: { en: 'Services', am: 'አገልግሎት' },
+    responseHelp: { en: 'Your response will help us improve our healthcare services. We appreciate your time!', am: 'አስተያየትዎ የጤና አገልግሎታችንን ለማሻሻል ይረዳናል። ጊዜዎን ስለሰጡን እናመሰግናለን!' },
+    eachSurveyOnce: { en: 'Each survey can only be submitted once. Thank you for your understanding.', am: 'እያንዳንዱ መጠይቅ አንድ ጊዜ ብቻ ሊላክ ይችላል። ለማስተዋልዎ እናመሰግናለን።' },
+    confidentialFinal: { en: 'Your response is confidential', am: 'አስተያየትዎ ሚስጥራዊ ነው' },
+    page: { en: 'Page', am: 'ገጽ' },
+    hospitalService: { en: 'Hospital and service feedback', am: 'የሆስፒታል እና አገልግሎት አስተያየት' },
+    language: { en: 'Language', am: 'ቋንቋ' },
+    loading: { en: 'Loading Survey', am: 'መጠይቅ በማስገባት ላይ' },
+    pleaseWait: { en: 'Please wait...', am: 'እባክዎ ይጠብቁ...' },
+    rating: { en: 'out of', am: 'ከ' },
+    tapToRate: { en: 'Tap to rate', am: 'ደረጃ ይስጡ' },
+    shareThoughts: { en: 'Share your thoughts with us...', am: 'አስተያየትዎን ለኛ ያጋሩ...' },
+    enterNumber: { en: 'Enter a number', am: 'ቁጥር ያስገቡ' },
+  };
+
+  function t(key) {
+    const val = translations[key];
+    if (typeof val === 'object' && val !== null) {
+      return val[selectedLang] || val.en || key;
+    }
+    return val || key;
+  }
 
   function getQuestionLabel(q) {
     const labelObj = q.label;
@@ -451,7 +498,7 @@ function SurveyPage() {
         <textarea
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => setQuestionValue(answerKey, e.target.value)}
-          placeholder="Share your thoughts with us..."
+          placeholder={t('shareThoughts')}
           className="w-full p-5 border-2 border-gray-100 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 resize-none transition-all text-gray-700"
           rows={4}
         />
@@ -466,7 +513,7 @@ function SurveyPage() {
           min={q.min ?? undefined}
           max={q.max ?? undefined}
           onChange={(e) => setQuestionValue(answerKey, e.target.value === '' ? '' : Number(e.target.value))}
-          placeholder="Enter a number"
+          placeholder={t('enterNumber')}
           className="w-full p-5 border-2 border-gray-100 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-200 transition-all text-gray-700"
         />
       );
@@ -565,7 +612,7 @@ function SurveyPage() {
       <div className="flex flex-col items-center gap-4">
         <StarRating value={value} min={min} max={max} onChange={(next) => setQuestionValue(answerKey, next)} size="xl" />
         <span className="text-base text-gray-500 font-medium">
-          {value ? `${value} out of ${max}` : `Tap to rate (${min}-${max})`}
+          {value ? `${value} ${t('rating')} ${max}` : `${t('tapToRate')} (${min}-${max})`}
         </span>
       </div>
     );
@@ -579,8 +626,8 @@ function SurveyPage() {
             <div className="absolute inset-0 border-4 border-blue-100 rounded-full"></div>
             <div className="absolute inset-0 border-4 border-transparent rounded-full border-t-blue-500 animate-spin"></div>
           </div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2">Loading Survey</h2>
-          <p className="text-gray-500">Please wait...</p>
+          <h2 className="text-xl font-bold text-gray-800 mb-2">{t('loading')}</h2>
+          <p className="text-gray-500">{t('pleaseWait')}</p>
         </div>
       </div>
     );
@@ -603,11 +650,11 @@ function SurveyPage() {
                   <Check className="w-6 h-6 text-white" />
                 </div>
               </div>
-              <h2 className="text-3xl font-bold mb-3">Thank You!</h2>
+              <h2 className="text-3xl font-bold mb-3">{t('thankYou')}</h2>
               <p className="text-emerald-100 text-lg">
                 {finishReason === 'submitted' 
-                  ? 'Your feedback has been submitted successfully!' 
-                  : 'This survey has already been completed.'}
+                  ? t('feedbackSubmitted')
+                  : t('surveyCompleted')}
               </p>
             </div>
           </div>
@@ -618,69 +665,39 @@ function SurveyPage() {
                 <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-2">
                   <MessageSquare className="w-7 h-7 text-blue-500" />
                 </div>
-                <p className="text-sm text-gray-500">Feedback</p>
-                <p className="font-bold text-gray-800">Received</p>
+                <p className="text-sm text-gray-500">{t('feedback')}</p>
+                <p className="font-bold text-gray-800">{t('received')}</p>
               </div>
               <div className="w-px bg-gray-200"></div>
               <div className="text-center">
                 <div className="w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-2">
                   <Heart className="w-7 h-7 text-emerald-500" />
                 </div>
-                <p className="text-sm text-gray-500">Your Voice</p>
-                <p className="font-bold text-gray-800">Matters</p>
+                <p className="text-sm text-gray-500">{t('yourVoice')}</p>
+                <p className="font-bold text-gray-800">{t('matters')}</p>
               </div>
               <div className="w-px bg-gray-200"></div>
               <div className="text-center">
                 <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-2">
                   <TrendingUp className="w-7 h-7 text-purple-500" />
                 </div>
-                <p className="text-sm text-gray-500">Better</p>
-                <p className="font-bold text-gray-800">Services</p>
+                <p className="text-sm text-gray-500">{t('better')}</p>
+                <p className="font-bold text-gray-800">{t('services')}</p>
               </div>
             </div>
             
             <p className="text-center text-gray-500">
               {finishReason === 'submitted' 
-                ? 'Your response will help us improve our healthcare services. We appreciate your time!'
-                : 'Each survey can only be submitted once. Thank you for your understanding.'}
+                ? t('responseHelp')
+                : t('eachSurveyOnce')}
             </p>
             
             <div className="mt-8 flex justify-center">
               <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl px-6 py-4 flex items-center gap-3">
                 <Shield className="w-5 h-5 text-gray-400" />
-                <span className="text-sm text-gray-500">Your response is confidential</span>
+                <span className="text-sm text-gray-500">{t('confidentialFinal')}</span>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!selectedLang && token) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-xl">
-            <Heart className="w-10 h-10 text-white" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-3">Select Your Language</h2>
-          <p className="text-gray-500 mb-8">Please select your preferred language</p>
-          <div className="space-y-4">
-            <button
-              onClick={() => setSelectedLang('en')}
-              className="w-full py-5 px-6 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold text-lg hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-3"
-            >
-              <span className="text-2xl">🇬🇧</span>
-              English
-            </button>
-            <button
-              onClick={() => setSelectedLang('am')}
-              className="w-full py-5 px-6 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-bold text-lg hover:from-emerald-600 hover:to-teal-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-3"
-            >
-              <span className="text-2xl">🇪🇹</span>
-              አማርኛ (Amharic)
-            </button>
           </div>
         </div>
       </div>
@@ -708,18 +725,44 @@ function SurveyPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 py-8 px-4">
       <div className="max-w-3xl mx-auto">
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 px-8 py-12 relative overflow-hidden">
+          <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-6 py-6 relative overflow-hidden">
             <div className="absolute inset-0 bg-grid-pattern opacity-10"></div>
-            <div className="absolute -top-24 -right-24 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
-            <div className="absolute -bottom-12 -left-12 w-36 h-36 bg-purple-400/20 rounded-full blur-2xl"></div>
+            <div className="absolute -top-20 -right-20 w-52 h-52 bg-white/10 rounded-full blur-3xl"></div>
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-cyan-400/20 rounded-full blur-2xl"></div>
             
-            <div className="relative z-10 flex items-center gap-5">
-              <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center shadow-xl">
-                <Heart className="w-8 h-8 text-white" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="bg-white rounded-2xl p-2 shadow-xl ring-4 ring-white/30">
+                  <img src="/image/girum-logo.png" alt="Girum Hospital" className="w-20 h-20 object-contain" />
+                </div>
+                <div className="hidden sm:block">
+                  <h1 className="text-2xl font-bold text-white">{t('welcomeTitle')}</h1>
+                  <p className="text-emerald-100 mt-0.5 text-sm">{t('welcomeSubtitle')}</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-3xl font-bold text-white">Patient Feedback</h1>
-                <p className="text-blue-100 mt-1">Your opinion helps us improve care</p>
+              <div className="flex items-center bg-white/15 backdrop-blur-md rounded-full p-1.5 shadow-lg ring-2 ring-white/20">
+                <button
+                  onClick={() => setSelectedLang('en')}
+                  className={`px-4 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
+                    selectedLang === 'en' 
+                      ? 'bg-white text-emerald-700 shadow-md' 
+                      : 'text-white hover:bg-white/10'
+                  }`}
+                >
+                  <span className="text-lg">🇬🇧</span>
+                  <span className="hidden sm:inline">English</span>
+                </button>
+                <button
+                  onClick={() => setSelectedLang('am')}
+                  className={`px-4 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 ${
+                    selectedLang === 'am' 
+                      ? 'bg-white text-emerald-700 shadow-md' 
+                      : 'text-white hover:bg-white/10'
+                  }`}
+                >
+                  <span className="text-lg">🇪🇹</span>
+                  <span className="hidden sm:inline">አማርኛ</span>
+                </button>
               </div>
             </div>
           </div>
@@ -739,14 +782,10 @@ function SurveyPage() {
 
 <form onSubmit={handleSubmit} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }} className="space-y-6">
               {currentPage === 0 && (
-                <div className="bg-gradient-to-br from-gray-50 to-white rounded-2xl p-5 flex items-center gap-4 border-2 border-gray-100">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow">
-                    {patientName.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 font-medium">Hello, welcome</p>
-                    <p className="text-lg font-bold text-gray-800">{patientName}</p>
-                  </div>
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border-2 border-blue-100">
+                  <p className="text-gray-700 leading-relaxed text-center">
+                    <span className="text-lg font-medium block">{selectedLang === 'am' ? t('welcomeTextAm') : t('welcomeTextEn')}</span>
+                  </p>
                 </div>
               )}
 
@@ -766,7 +805,7 @@ function SurveyPage() {
                         ) : (
                           <Users className="w-4 h-4" />
                         )}
-                        <span className="text-sm font-medium whitespace-nowrap">Doctors ({doctors.length})</span>
+                        <span className="text-sm font-medium whitespace-nowrap">{t('doctorsShort')} ({doctors.length})</span>
                       </div>
                       {generalQuestions.length > 0 && (
                         <div className={`w-6 h-0.5 ${currentPage >= doctors.length ? 'bg-emerald-400' : 'bg-gray-300'}`} />
@@ -782,7 +821,7 @@ function SurveyPage() {
                       }`}
                     >
                       <ClipboardList className="w-4 h-4" />
-                      <span className="text-sm font-medium">General</span>
+                      <span className="text-sm font-medium">{t('general')}</span>
                     </div>
                   )}
                 </div>
@@ -810,8 +849,8 @@ function SurveyPage() {
                           <Users className="w-6 h-6 text-white" />
                         </div>
                         <div>
-                          <h3 className="font-bold text-gray-800 text-xl">Doctor Survey</h3>
-                          <p className="text-sm text-gray-500">Page {currentPage + 1} of {totalPages}</p>
+                          <h3 className="font-bold text-gray-800 text-xl">{t('doctorSurvey')}</h3>
+                          <p className="text-sm text-gray-500">{t('page')} {currentPage + 1} {t('rating')} {totalPages}</p>
                         </div>
                       </div>
 
@@ -850,7 +889,7 @@ function SurveyPage() {
                             className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2"
                           >
                             <ChevronLeft className="w-5 h-5" />
-                            Previous
+                            {t('previous')}
                           </button>
                         ) : (
                           <div />
@@ -879,7 +918,7 @@ function SurveyPage() {
                           }}
                           className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:from-blue-600 hover:to-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-200"
                         >
-                          {currentPage === doctors.length - 1 && generalQuestions.length > 0 ? 'Next: General' : 'Next'}
+                          {currentPage === doctors.length - 1 && generalQuestions.length > 0 ? t('nextGeneral') : t('next')}
                           <ArrowRight className="w-5 h-5" />
                         </button>
                       </div>
@@ -894,8 +933,8 @@ function SurveyPage() {
                         <ClipboardList className="w-6 h-6 text-white" />
                       </div>
                       <div>
-                        <h3 className="font-bold text-gray-800 text-xl">General Survey</h3>
-                        <p className="text-sm text-gray-500">Hospital and service feedback</p>
+                        <h3 className="font-bold text-gray-800 text-xl">{t('generalSurvey')}</h3>
+                        <p className="text-sm text-gray-500">{t('hospitalService')}</p>
                       </div>
                     </div>
 
@@ -919,7 +958,7 @@ function SurveyPage() {
                         className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2"
                       >
                         <ChevronLeft className="w-5 h-5" />
-                        Previous
+                        {t('previous')}
                       </button>
                       <button
                         type="submit"
@@ -929,12 +968,12 @@ function SurveyPage() {
                         {submitting ? (
                           <>
                             <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Submitting...
+                            {t('submitting')}
                           </>
                         ) : (
                           <>
                             <Send className="w-5 h-5" />
-                            Submit Feedback
+                            {t('submit')}
                           </>
                         )}
                       </button>
@@ -942,7 +981,7 @@ function SurveyPage() {
 
                     <div className="flex items-center justify-center gap-3 text-sm text-gray-400 mt-4">
                       <Shield className="w-4 h-4" />
-                      <span>Your response is confidential and secure</span>
+                      <span>{t('confidential')}</span>
                     </div>
                   </div>
                 );
