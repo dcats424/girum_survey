@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS feedback_submissions (
   doctor_names TEXT,
   comment TEXT,
   question_answers JSONB NOT NULL DEFAULT '{}'::jsonb,
+  language TEXT DEFAULT 'am',
   submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

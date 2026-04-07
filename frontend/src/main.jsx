@@ -370,6 +370,9 @@ function SurveyPage() {
         if (!res.ok || data.error) {
           const apiError = data.error || 'Unable to load survey';
           if (apiError === 'used_token') {
+            if (data.language) {
+              setSelectedLang(data.language);
+            }
             setIsFinished(true);
             setFinishReason('used');
             setError('');
@@ -459,7 +462,8 @@ function SurveyPage() {
     try {
       const payload = {
         token,
-        question_answers: questionAnswers
+        question_answers: questionAnswers,
+        language: selectedLang
       };
 
       const res = await fetch('/api/feedback', {
@@ -732,8 +736,8 @@ function SurveyPage() {
             
             <div className="relative z-10 flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="bg-white rounded-2xl p-2 shadow-xl ring-4 ring-white/30">
-                  <img src="/image/girum-logo.png" alt="Girum Hospital" className="w-20 h-20 object-contain" />
+                <div className="relative">
+                  <img src="/image/girum-logo.png" alt="Girum Hospital" className="relative w-36 h-36 object-contain" style={{filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))'}} />
                 </div>
                 <div className="hidden sm:block">
                   <h1 className="text-2xl font-bold text-white">{t('welcomeTitle')}</h1>
@@ -1011,6 +1015,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
   const [editUserModal, setEditUserModal] = React.useState({ isOpen: false, user: null });
   const [editUserData, setEditUserData] = React.useState({ username: '', email: '', password: '', is_active: true });
   const [activityLogs, setActivityLogs] = React.useState([]);
+  const [activityPagination, setActivityPagination] = React.useState({ page: 1, limit: 5, total: 0, total_pages: 0 });
   const [userDeleteModal, setUserDeleteModal] = React.useState({ isOpen: false, user: null });
 
   const [filters, setFilters] = React.useState({ search: '', date_from: '', date_to: '' });
@@ -1141,14 +1146,27 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
     }
   }
 
-  async function fetchActivityLogs() {
+  async function fetchActivityLogs(page = 1, limit = 5) {
     try {
-      const res = await fetch('/api/admin/activity-logs?limit=50', { headers: headers() });
+      const res = await fetch(`/api/admin/activity-logs?page=${page}&limit=${limit}`, { headers: headers() });
       const data = await res.json();
-      if (res.ok) setActivityLogs(data.logs || []);
+      if (res.ok) {
+        setActivityLogs(data.logs || []);
+        setActivityPagination({
+          page: data.page || 1,
+          limit: data.limit || limit,
+          total: data.total || 0,
+          total_pages: data.total_pages || 0
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch activity logs:', err);
     }
+  }
+
+  function changeActivityPage(newPage) {
+    if (newPage < 1 || newPage > activityPagination.total_pages) return;
+    fetchActivityLogs(newPage, activityPagination.limit);
   }
 
   React.useEffect(() => {
@@ -2739,7 +2757,7 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                 <p className="text-gray-500">Track all admin actions and changes</p>
               </div>
               <button
-                onClick={fetchActivityLogs}
+                onClick={() => fetchActivityLogs(activityPagination.page, activityPagination.limit)}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all"
               >
                 <RefreshCw className="w-4 h-4" /> Refresh
@@ -2794,6 +2812,57 @@ function AdminDashboard({ authToken, currentUser, onLogout }) {
                   </tbody>
                 </table>
               </div>
+              {activityPagination.total > 0 && (
+                <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                  <div className="text-sm text-gray-500">
+                    Showing {((activityPagination.page - 1) * activityPagination.limit) + 1} to {Math.min(activityPagination.page * activityPagination.limit, activityPagination.total)} of {activityPagination.total} entries
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={activityPagination.limit}
+                      onChange={(e) => {
+                        const newLimit = Number(e.target.value);
+                        fetchActivityLogs(1, newLimit);
+                      }}
+                      className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value={5}>5 per page</option>
+                      <option value={10}>10 per page</option>
+                      <option value={20}>20 per page</option>
+                      <option value={50}>50 per page</option>
+                    </select>
+                    <button
+                      onClick={() => changeActivityPage(activityPagination.page - 1)}
+                      disabled={activityPagination.page <= 1}
+                      className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: activityPagination.total_pages }, (_, i) => i + 1).map(page => (
+                        <button
+                          key={page}
+                          onClick={() => changeActivityPage(page)}
+                          className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${
+                            page === activityPagination.page
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => changeActivityPage(activityPagination.page + 1)}
+                      disabled={activityPagination.page >= activityPagination.total_pages}
+                      className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -834,7 +834,17 @@ app.get('/api/survey', async function (req, res) {
   if (!token) return res.status(400).json({ error: 'token_required' });
 
   const survey = await validateTokenFromSourceAPI(token);
-  if (survey.error) return res.status(400).json({ error: survey.error });
+  if (survey.error) {
+    if (survey.error === 'used_token') {
+      const existingSubmission = await db.query(
+        'SELECT language FROM feedback_submissions WHERE token = $1 LIMIT 1',
+        [token]
+      );
+      const usedLanguage = existingSubmission.rows[0]?.language || 'am';
+      return res.status(400).json({ error: 'used_token', language: usedLanguage });
+    }
+    return res.status(400).json({ error: survey.error });
+  }
 
   await ensureQuestionsTableAndDefaults();
   
@@ -871,6 +881,7 @@ app.post('/api/feedback', async function (req, res) {
   try {
     const token = req.body.token;
     const questionAnswers = req.body.question_answers || {};
+    const language = req.body.language || 'am';
 
     if (!token) return res.status(400).json({ error: 'token_required' });
 
@@ -885,8 +896,8 @@ app.post('/api/feedback', async function (req, res) {
       await client.query('BEGIN');
 
       const sub = await client.query(
-        'INSERT INTO feedback_submissions(token, visit_id, patient_id, patient_name, doctor_names, doctor_ids, question_answers) VALUES($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING id',
-        [token, survey.visit_id, survey.patient_id || null, survey.patient_name, doctorNames, doctorIds, JSON.stringify(questionAnswers)]
+        'INSERT INTO feedback_submissions(token, visit_id, patient_id, patient_name, doctor_names, doctor_ids, question_answers, language) VALUES($1, $2, $3, $4, $5, $6, $7::jsonb, $8) RETURNING id',
+        [token, survey.visit_id, survey.patient_id || null, survey.patient_name, doctorNames, doctorIds, JSON.stringify(questionAnswers), language]
       );
 
       const submissionId = sub.rows[0].id;
@@ -1775,15 +1786,28 @@ app.patch('/api/admin/users/:id', requireAuth, async function (req, res) {
 
 app.get('/api/admin/activity-logs', requireAuth, async function (req, res) {
   try {
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 5));
+    const offset = (page - 1) * limit;
+    
+    const countResult = await db.query('SELECT COUNT(*) FROM activity_logs');
+    const total = parseInt(countResult.rows[0].count);
+    
     const result = await db.query(`
       SELECT al.*, au.username 
       FROM activity_logs al 
       LEFT JOIN admin_users au ON au.id = al.user_id 
       ORDER BY al.created_at DESC 
-      LIMIT $1
-    `, [limit]);
-    return res.json({ logs: result.rows });
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
+    
+    return res.json({ 
+      logs: result.rows,
+      page,
+      limit,
+      total,
+      total_pages: Math.ceil(total / limit)
+    });
   } catch (e) {
     return res.status(500).json({ error: 'fetch_failed', details: e.message });
   }
